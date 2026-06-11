@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+venv/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Data
+data/
+backup/
+
+# AI Agents
+.codex
+
+# Custom
+debug/
+# assets/
+queries.md
+/.env
+outputs_*/
+log_*
+*-lora/

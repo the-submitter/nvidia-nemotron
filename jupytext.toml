@@ -1,0 +1,3 @@
+# jupytext.toml
+cell_metadata_filter = "-all"
+notebook_metadata_filter = "-all"
