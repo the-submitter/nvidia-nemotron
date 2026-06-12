@@ -19,4 +19,4 @@ causal_conv1d
 torchao>=0.16.0
 
 # update dataset / grpo / gspo
-vllm
+vllm>=0.12.0

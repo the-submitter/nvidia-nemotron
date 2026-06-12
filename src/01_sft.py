@@ -6,22 +6,32 @@ from pathlib import Path
 from typing import Any, Optional
 
 # %%
-# # User secrets
+# %%
+# User secrets
 # try:
 #     from kaggle_secrets import UserSecretsClient  # type: ignore
 
 #     user_secrets = UserSecretsClient()
+#     KAGGLE_KEY = user_secrets.get_secret("KAGGLE_KEY")
+#     KAGGLE_USERNAME = user_secrets.get_secret("KAGGLE_USERNAME")
 #     HF_KEY = user_secrets.get_secret("HF_KEY")
 #     WANDB_KEY = user_secrets.get_secret("WANDB_KEY")
 # except Exception:
+#     KAGGLE_KEY = os.environ.get("KAGGLE_KEY")
+#     KAGGLE_USERNAME = os.environ.get("KAGGLE_USERNAME")
 #     HF_KEY = os.environ.get("HF_KEY") or os.environ.get("HF_TOKEN")
 #     WANDB_KEY = os.environ.get("WANDB_KEY") or os.environ.get("WANDB_API_KEY")
 
+# if KAGGLE_KEY:
+#     os.environ["KAGGLE_KEY"] = KAGGLE_KEY
+# if KAGGLE_USERNAME:
+#     os.environ["KAGGLE_USERNAME"] = KAGGLE_USERNAME
 # if HF_KEY:
 #     os.environ["HF_TOKEN"] = HF_KEY
 # if WANDB_KEY:
 #     os.environ["WANDB_API_KEY"] = WANDB_KEY
-HF_KEY = WANDB_KEY = None
+
+HF_KEY = WANDB_KEY = KAGGLE_KEY = KAGGLE_USERNAME = None
 
 # %%
 wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
@@ -90,6 +100,10 @@ HF_ADAPTER_REPO = os.environ.get(
     "HF_ADAPTER_REPO",
     f"{HF_USERNAME}/nemotron-lora-{LORA_STAGE}-{LORA_VERSION}",
 )
+KAGGLE_ADAPTER_REPO = os.environ.get(
+    "KAGGLE_ADAPTER_REPO",
+    f"{KAGGLE_USERNAME}/nemotron-3-nano/transformers/lora-{LORA_STAGE}",
+)
 
 MAX_SEQ_LENGTH = int(os.environ.get("MAX_SEQ_LENGTH", "8192"))
 DATASET_WORKERS = max(1, int(os.environ.get("DATASET_NUM_PROC", "8")))
@@ -97,26 +111,31 @@ DATASET_NUM_PROC = DATASET_WORKERS if DATASET_WORKERS > 1 else None
 SEED = int(os.environ.get("SEED", "3407"))
 
 PER_DEVICE_TRAIN_BATCH_SIZE = int(
-    os.environ.get("PER_DEVICE_TRAIN_BATCH_SIZE", "4")
+    os.environ.get("PER_DEVICE_TRAIN_BATCH_SIZE", "3")
 )
-PER_DEVICE_EVAL_BATCH_SIZE = int(os.environ.get("PER_DEVICE_EVAL_BATCH_SIZE", "4"))
+PER_DEVICE_EVAL_BATCH_SIZE = int(os.environ.get("PER_DEVICE_EVAL_BATCH_SIZE", "3"))
 GRADIENT_ACCUMULATION_STEPS = int(
-    os.environ.get("GRADIENT_ACCUMULATION_STEPS", "8")
+    os.environ.get("GRADIENT_ACCUMULATION_STEPS", "4")
 )
 NUM_TRAIN_EPOCHS = float(os.environ.get("NUM_TRAIN_EPOCHS", "1"))
 MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))
 LEARNING_RATE = float(os.environ.get("LEARNING_RATE", "2e-4"))
 WARMUP_STEPS = int(os.environ.get("WARMUP_STEPS", "10"))
 LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "10"))
-SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "20"))
+SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "50"))
 EVAL_STEPS = int(os.environ.get("EVAL_STEPS", str(SAVE_STEPS)))
 SAVE_TOTAL_LIMIT = int(os.environ.get("SAVE_TOTAL_LIMIT", "2"))
 
 LORA_R = int(os.environ.get("LORA_R", "32"))
 LORA_ALPHA = int(os.environ.get("LORA_ALPHA", "64"))
 REPORT_TO = os.environ.get("REPORT_TO", "wandb")
-RESUME_FROM_CHECKPOINT = os.environ.get("RESUME_FROM_CHECKPOINT")
+RESUME_FROM_CHECKPOINT = os.environ.get("RESUME_FROM_CHECKPOINT", "1")
 PUSH_TO_HUB = os.environ.get("PUSH_TO_HUB", "0").lower() not in {
+    "0",
+    "false",
+    "no",
+}
+PUSH_TO_KAGGLE = os.environ.get("PUSH_TO_KAGGLE", "0").lower() not in {
     "0",
     "false",
     "no",
@@ -143,6 +162,7 @@ RESPONSE_PART = os.environ.get(
 if REPORT_TO == "wandb":
     os.environ["WANDB_MODE"] = "offline"
     os.environ["WANDB_DIR"] = "/kaggle/working/wandb_logs"
+    os.environ["WANDB_SILENT"] = "true"
     os.makedirs("/kaggle/working/wandb_logs", exist_ok=True)
 
 
@@ -215,7 +235,7 @@ def render_conversations(
             fallback_assistant = dict(fallback_conversation[-1])
             fallback_assistant.pop("reasoning_content", None)
             fallback_assistant["content"] = (
-                f"<think>{reasoning}</think>\n"
+                f"<think>\n{reasoning}\n</think>\n"
                 f"{fallback_assistant['content']}"
             )
             fallback_conversation[-1] = fallback_assistant
@@ -554,18 +574,40 @@ tokenizer.save_pretrained(str(ADAPTER_OUTPUT_DIR))
 
 # %%
 if PUSH_TO_HUB:
-    if not HF_KEY:
-        raise RuntimeError("PUSH_TO_HUB=1 but HF_KEY/HF_TOKEN is not configured")
-    model.push_to_hub(
-        HF_ADAPTER_REPO,
-        token=HF_KEY,
-        private=True,
-    )
-    tokenizer.push_to_hub(
-        HF_ADAPTER_REPO,
-        token=HF_KEY,
-        private=True,
-    )
+    try:
+        if not HF_KEY:
+            raise RuntimeError("PUSH_TO_HUB=1 but HF_KEY/HF_TOKEN is not configured")
+        model.push_to_hub(
+            HF_ADAPTER_REPO,
+            token=HF_KEY,
+            private=True,
+        )
+        tokenizer.push_to_hub(
+            HF_ADAPTER_REPO,
+            token=HF_KEY,
+            private=True,
+        )
+    except Exception as e:
+        print(f"Upload to HF failed: {e}")
+    else:
+        print(f"Upload to HF succeeded")
+
+# %%
+if PUSH_TO_KAGGLE:
+    try:
+        import kagglehub
+        
+        # This creates the model repository or pushes a new version if it already exists
+        kagglehub.model_upload(
+            handle=KAGGLE_ADAPTER_REPO,
+            local_model_dir=ADAPTER_OUTPUT_DIR,
+            version_notes=f"LoRA {LORA_STAGE} for unsloth/Nemotron-3-Nano-30B-A3B",
+            license_name="Apache 2.0",
+        )
+    except Exception as e:
+        print(f"Upload to Kaggle failed: {e}")
+    else:
+        print(f"Upload to Kaggle succeeded")
 
 # %%
 peak_reserved = torch.cuda.max_memory_reserved() / 1024**3

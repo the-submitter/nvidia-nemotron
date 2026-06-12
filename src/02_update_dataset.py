@@ -1,0 +1,870 @@
+# %%
+from __future__ import annotations
+
+import csv
+import json
+import math
+import multiprocessing
+import os
+import re
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from typing import Any, Optional
+
+# %%
+# User secrets
+# try:
+#     from kaggle_secrets import UserSecretsClient  # type: ignore
+
+#     user_secrets = UserSecretsClient()
+#     KAGGLE_KEY = user_secrets.get_secret("KAGGLE_KEY")
+#     KAGGLE_USERNAME = user_secrets.get_secret("KAGGLE_USERNAME")
+#     HF_KEY = user_secrets.get_secret("HF_KEY")
+# except Exception:
+#     KAGGLE_KEY = os.environ.get("KAGGLE_KEY")
+#     KAGGLE_USERNAME = os.environ.get("KAGGLE_USERNAME")
+#     HF_KEY = os.environ.get("HF_KEY") or os.environ.get("HF_TOKEN")
+
+# if KAGGLE_KEY:
+#     os.environ["KAGGLE_KEY"] = KAGGLE_KEY
+# if KAGGLE_USERNAME:
+#     os.environ["KAGGLE_USERNAME"] = KAGGLE_USERNAME
+# if HF_KEY:
+#     os.environ["HF_TOKEN"] = HF_KEY
+
+HF_KEY = KAGGLE_KEY = KAGGLE_USERNAME = None
+
+# %%
+wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
+# !pip install uv --no-index --find-links={wheels_dir}
+# !uv pip install \
+#     "triton>=3.3.0" \
+#     "torchvision==0.25.0+cu128" \
+#     bitsandbytes \
+#     "transformers>=4.56.2" \
+#     "tokenizers>=0.22.0,<=0.23.0" \
+#     "trl>=0.22.2" \
+#     unsloth \
+#     unsloth_zoo \
+#     --no-index --find-links={wheels_dir}
+# !uv pip install --no-deps "torchcodec==0.10.0+cu128" --no-index --find-links={wheels_dir}
+# !uv pip install \
+#     mamba_ssm \
+#     causal_conv1d \
+#     --no-index --find-links={wheels_dir}
+# !uv pip install --no-deps --upgrade \
+#     "torchao>=0.16.0" \
+#     --no-index --find-links={wheels_dir}
+# !uv pip install vllm --no-index --find-links={wheels_dir}
+
+# %%
+WORKING_DIR = Path(os.environ.get("WORKING_DIR", "/kaggle/working"))
+MODEL_PATH = os.environ.get(
+    "MODEL_PATH",
+    "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/default/1",
+)
+LORA_PATH = os.environ.get(
+    "LORA_PATH",
+    "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/lora-sft/1",
+)
+DATASET_PATH = os.environ.get(
+    "DATASET_PATH",
+    "/kaggle/input/datasets/rohitraje0493/nemotron-reasoning",
+)
+DATASET_REVISION = os.environ.get("DATASET_REVISION")
+SPLIT_NAMES = ("train", "validation", "test")
+HF_CACHE_DIR = Path(os.environ.get("HF_CACHE_DIR", "/tmp/hf_cache"))
+
+DATASET_TAG = os.environ.get("DATASET_TAG", "nemotron-reasoning")
+LOCAL_OUTPUT_DIR = Path(
+    os.environ.get("LOCAL_OUTPUT_DIR", str(WORKING_DIR / DATASET_TAG))
+)
+BACKUP_DIR = Path(
+    os.environ.get("BACKUP_DIR", str(WORKING_DIR / f"{DATASET_TAG}-backups"))
+)
+INCREMENTAL_DIR = Path(
+    os.environ.get(
+        "INCREMENTAL_DIR",
+        str(WORKING_DIR / f"{DATASET_TAG}-incremental"),
+    )
+)
+KAGGLE_OUTPUT_DIR = Path(
+    os.environ.get(
+        "KAGGLE_OUTPUT_DIR",
+        str(WORKING_DIR / f"{DATASET_TAG}-kaggle"),
+    )
+)
+HF_UPLOAD_USERNAME = os.environ.get(
+    "HF_UPLOAD_USERNAME",
+    "the-submitter",
+)
+
+TRAJECTORIES = max(1, int(os.environ.get("TRAJECTORIES", "4")))
+PROMPT_BATCH_SIZE = max(1, int(os.environ.get("PROMPT_BATCH_SIZE", "100")))
+EXISTING_RESPONSE_RATIO = float(os.environ.get("EXISTING_RESPONSE_RATIO", "0.1"))
+SEED = int(os.environ.get("SEED", "3407"))
+DATASET_WORKERS = max(1, int(os.environ.get("DATASET_NUM_PROC", "8")))
+DATASET_NUM_PROC = DATASET_WORKERS if DATASET_WORKERS > 1 else None
+KEEP_IN_MEMORY = os.environ.get("KEEP_IN_MEMORY", "1").lower() not in {
+    "0",
+    "false",
+    "no",
+}
+
+MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "7680"))
+TOP_P = float(os.environ.get("TOP_P", "1.0"))
+TEMPERATURE = float(os.environ.get("TEMPERATURE", "1.0"))
+MAX_NUM_SEQS = int(os.environ.get("MAX_NUM_SEQS", "64"))
+GPU_MEMORY_UTILIZATION = float(os.environ.get("GPU_MEMORY_UTILIZATION", "0.95"))
+MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", "8192"))
+MAX_LORA_RANK = int(os.environ.get("MAX_LORA_RANK", "32"))
+TENSOR_PARALLEL_SIZE = int(os.environ.get("TENSOR_PARALLEL_SIZE", "1"))
+ENABLE_PREFIX_CACHING = os.environ.get("ENABLE_PREFIX_CACHING", "1").lower() not in {
+    "0",
+    "false",
+    "no",
+}
+ENABLE_CHUNKED_PREFILL = os.environ.get("ENABLE_CHUNKED_PREFILL", "1").lower() not in {
+    "0",
+    "false",
+    "no",
+}
+CACHE_MODEL_WEIGHTS = os.environ.get("CACHE_MODEL_WEIGHTS", "0").lower() not in {
+    "0",
+    "false",
+    "no",
+}
+CACHE_MODEL_WORKERS = int(os.environ.get("CACHE_MODEL_WORKERS", "16"))
+CACHE_MODEL_CHUNK_MB = int(os.environ.get("CACHE_MODEL_CHUNK_MB", "1024"))
+
+UPLOAD_TO_HF = os.environ.get("UPLOAD_TO_HF", "0").lower() not in {
+    "0",
+    "false",
+    "no",
+}
+UPLOAD_TO_KAGGLE = os.environ.get("UPLOAD_TO_KAGGLE", "0").lower() not in {
+    "0",
+    "false",
+    "no",
+}
+DEBUG_CSV_BACKUP = os.environ.get("DEBUG_CSV_BACKUP", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+BACKUP_TRAJECTORIES = os.environ.get("BACKUP_TRAJECTORIES", "1").lower() not in {
+    "0",
+    "false",
+    "no",
+}
+
+if not 0.0 <= EXISTING_RESPONSE_RATIO:
+    raise ValueError("EXISTING_RESPONSE_RATIO must be non-negative")
+
+BOXED_ANSWER_INSTRUCTION = (
+    "\nPlease put your final answer inside `\\boxed{}`. "
+    "For example: `\\boxed{your answer}`"
+)
+BOXED_START_RE = re.compile(r"\\boxed\{")
+THINK_RE = re.compile(r"<think>(.*?)</think>", re.IGNORECASE | re.DOTALL)
+FALLBACK_ANSWER_PATTERNS = [
+    re.compile(r"The final answer is:\s*([^\n]+)", re.IGNORECASE),
+    re.compile(r"Final answer is:\s*([^\n]+)", re.IGNORECASE),
+    re.compile(r"Final answer\s*[:：]\s*([^\n]+)", re.IGNORECASE),
+    re.compile(r"final answer\s*[:：]\s*([^\n]+)", re.IGNORECASE),
+]
+NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
+BINARY_RE = re.compile(r"[01]+")
+
+BACKUP_FIELDS = (
+    "split",
+    "row_index",
+    "id",
+    "prompt",
+    "stored_answer",
+    "had_response",
+    "chosen",
+    "rejected",
+    "trajectory_outputs",
+    "trajectory_answers",
+    "trajectory_correct",
+)
+
+
+# %%
+def clean_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def extract_final_answer(text: Optional[str]) -> str:
+    if text is None:
+        return "NOT_FOUND"
+
+    boxed_starts = list(BOXED_START_RE.finditer(text))
+    matches = []
+    for index, match in enumerate(boxed_starts):
+        start = match.end()
+        end = (
+            boxed_starts[index + 1].start()
+            if index + 1 < len(boxed_starts)
+            else len(text)
+        )
+        segment = text[start:end]
+        last_brace = segment.rfind("}")
+        matches.append(segment[:last_brace] if last_brace != -1 else segment)
+    if matches:
+        non_empty = [match.strip() for match in matches if match.strip()]
+        if non_empty:
+            return non_empty[-1]
+        return matches[-1].strip()
+
+    for pattern in FALLBACK_ANSWER_PATTERNS:
+        matches = pattern.findall(text)
+        if matches:
+            return matches[-1].strip()
+
+    matches = NUMBER_RE.findall(text)
+    if matches:
+        return matches[-1]
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return lines[-1] if lines else "NOT_FOUND"
+
+
+def verify(stored_answer: Any, predicted: Any) -> bool:
+    stored = clean_text(stored_answer)
+    prediction = clean_text(predicted)
+    if stored is None or prediction is None or prediction == "NOT_FOUND":
+        return False
+
+    if BINARY_RE.fullmatch(stored):
+        return prediction.lower() == stored.lower()
+
+    try:
+        return math.isclose(
+            float(stored),
+            float(prediction),
+            rel_tol=1e-2,
+            abs_tol=1e-5,
+        )
+    except Exception:
+        return prediction.lower() == stored.lower()
+
+
+def combine_reasoning_response(reasoning: Any, response: Any) -> Optional[str]:
+    normalized_response = clean_text(response)
+    if normalized_response is None:
+        return None
+    normalized_reasoning = clean_text(reasoning)
+    if normalized_reasoning is None:
+        return normalized_response
+    return f"<think>\n{normalized_reasoning}\n</think>\n{normalized_response}"
+
+
+def split_think_content(value: Any) -> tuple[Optional[str], Optional[str]]:
+    text = clean_text(value)
+    if text is None:
+        return None, None
+
+    matches = list(THINK_RE.finditer(text))
+    if not matches:
+        return None, text
+
+    reasoning = "\n\n".join(
+        match.group(1).strip()
+        for match in matches
+        if match.group(1).strip()
+    )
+    response = THINK_RE.sub("", text).strip()
+    return clean_text(reasoning), clean_text(response)
+
+
+def select_preference(
+    example: dict[str, Any],
+    trajectory_outputs: list[str],
+) -> dict[str, Any]:
+    stored_answer = clean_text(example.get("final_answer"))
+    extracted_answers = [
+        extract_final_answer(output)
+        for output in trajectory_outputs
+    ]
+    correctness = [
+        verify(stored_answer, answer)
+        for answer in extracted_answers
+    ]
+
+    indexed_outputs = list(enumerate(trajectory_outputs))
+    correct_outputs = [
+        (index, output)
+        for index, output in indexed_outputs
+        if correctness[index]
+    ]
+    wrong_outputs = [
+        (index, output)
+        for index, output in indexed_outputs
+        if not correctness[index]
+    ]
+    correct_outputs.sort(key=lambda item: (len(item[1]), item[0]))
+    wrong_outputs.sort(key=lambda item: (len(item[1]), item[0]))
+
+    existing_chosen = combine_reasoning_response(
+        example.get("reasoning"),
+        example.get("response"),
+    )
+    chosen = (
+        existing_chosen
+        if existing_chosen is not None
+        else correct_outputs[0][1] if correct_outputs else None
+    )
+    rejected = wrong_outputs[0][1] if wrong_outputs else None
+    return {
+        "chosen": chosen,
+        "rejected": rejected,
+        "trajectory_answers": extracted_answers,
+        "trajectory_correct": correctness,
+    }
+
+
+# %%
+def load_reasoning_dataset():
+    from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
+
+    dataset_path = Path(DATASET_PATH)
+    if dataset_path.exists():
+        if (
+            (dataset_path / "dataset_dict.json").exists()
+            or (dataset_path / "dataset_info.json").exists()
+        ):
+            loaded = load_from_disk(
+                str(dataset_path),
+                keep_in_memory=KEEP_IN_MEMORY,
+            )
+        else:
+            parquet_files = sorted(dataset_path.rglob("*.parquet"))
+            if not parquet_files:
+                raise FileNotFoundError(
+                    f"No Hugging Face dataset or parquet files found at {dataset_path}"
+                )
+            loaded = load_dataset(
+                "parquet",
+                data_dir=str(dataset_path),
+                cache_dir=str(HF_CACHE_DIR),
+                keep_in_memory=KEEP_IN_MEMORY,
+            )
+    else:
+        loaded = load_dataset(
+            DATASET_PATH,
+            revision=DATASET_REVISION,
+            token=HF_KEY,
+            cache_dir=str(HF_CACHE_DIR),
+            keep_in_memory=KEEP_IN_MEMORY,
+        )
+
+    if isinstance(loaded, Dataset):
+        loaded = DatasetDict({"train": loaded})
+    resumed_splits = {}
+    for split_name, split_dataset in loaded.items():
+        snapshot = incremental_split_path(split_name)
+        if snapshot.exists():
+            split_dataset = load_dataset(
+                "parquet",
+                data_files=str(snapshot),
+                split="train",
+                cache_dir=str(HF_CACHE_DIR),
+                keep_in_memory=KEEP_IN_MEMORY,
+            )
+            print(f"{split_name}: resumed incremental snapshot {snapshot}")
+        resumed_splits[split_name] = ensure_preference_columns(
+            split_dataset,
+            split_name,
+        )
+    return DatasetDict(resumed_splits)
+
+
+def ensure_preference_columns(dataset, split_name: str):
+    from datasets import Features, Value
+
+    features = dict(dataset.features)
+    features["chosen"] = Value("string")
+    features["rejected"] = Value("string")
+    features["dpo_row_index"] = Value("int64")
+    features["dpo_selected"] = Value("bool")
+    features["dpo_processed"] = Value("bool")
+
+    def normalize_state(example: dict[str, Any], index: int) -> dict[str, Any]:
+        row_index = example.get("dpo_row_index")
+        return {
+            "chosen": clean_text(example.get("chosen")),
+            "rejected": clean_text(example.get("rejected")),
+            "dpo_row_index": index if row_index is None else int(row_index),
+            "dpo_selected": bool(example.get("dpo_selected", False)),
+            "dpo_processed": bool(example.get("dpo_processed", False)),
+        }
+
+    return dataset.map(
+        normalize_state,
+        with_indices=True,
+        features=Features(features),
+        num_proc=DATASET_NUM_PROC,
+        desc=f"{split_name}: initialize DPO columns",
+        keep_in_memory=KEEP_IN_MEMORY,
+    )
+
+
+def incremental_split_path(split_name: str) -> Path:
+    return INCREMENTAL_DIR / f"{split_name}.parquet"
+
+
+def persist_incremental_split(dataset, split_name: str) -> None:
+    INCREMENTAL_DIR.mkdir(parents=True, exist_ok=True)
+    target = incremental_split_path(split_name)
+    temporary = target.with_suffix(".tmp.parquet")
+    dataset.to_parquet(temporary)
+    os.replace(temporary, target)
+    print(f"{split_name}: persisted incremental snapshot to {target}")
+
+
+def select_generation_candidates(dataset, split_name: str):
+    already_selected = dataset.filter(
+        lambda example: bool(example.get("dpo_selected"))
+        and not bool(example.get("dpo_processed")),
+        num_proc=DATASET_NUM_PROC,
+        desc=f"{split_name}: recover selected candidates",
+        keep_in_memory=KEEP_IN_MEMORY,
+    )
+    if len(already_selected):
+        print(
+            f"{split_name}: recovered {len(already_selected):,} "
+            "selected unprocessed candidates"
+        )
+        return dataset, already_selected
+
+    missing_response_indices = [
+        index
+        for index, example in enumerate(dataset)
+        if not example["dpo_processed"]
+        and clean_text(example.get("response")) is None
+    ]
+    existing_response_indices = [
+        index
+        for index, example in enumerate(dataset)
+        if not example["dpo_processed"]
+        and clean_text(example.get("response")) is not None
+    ]
+    extra_count = min(
+        len(existing_response_indices),
+        round(len(missing_response_indices) * EXISTING_RESPONSE_RATIO),
+    )
+    if extra_count:
+        import random
+
+        random_generator = random.Random(SEED)
+        sampled_existing_indices = random_generator.sample(
+            existing_response_indices,
+            extra_count,
+        )
+    else:
+        sampled_existing_indices = []
+
+    selected_indices = sorted(
+        missing_response_indices + sampled_existing_indices
+    )
+    selected_index_set = set(selected_indices)
+    if selected_indices:
+        dataset = dataset.map(
+            lambda example, index: {
+                "dpo_selected": example["dpo_selected"] or index in selected_index_set
+            },
+            with_indices=True,
+            num_proc=DATASET_NUM_PROC,
+            desc=f"{split_name}: mark selected candidates",
+            keep_in_memory=KEEP_IN_MEMORY,
+        )
+        persist_incremental_split(dataset, split_name)
+
+    candidates = dataset.select(selected_indices) if selected_indices else dataset.select([])
+    print(
+        f"{split_name}: candidates={len(candidates):,} "
+        f"(missing={len(missing_response_indices):,}, "
+        f"existing_sample={len(sampled_existing_indices):,})"
+    )
+    return dataset, candidates
+
+
+# %%
+def cache_model(
+    path: str | Path,
+    num_workers: Optional[int] = None,
+    chunk_mb: int = 256,
+) -> int:
+    model_path = Path(path)
+    files = sorted(
+        file
+        for file in model_path.rglob("*")
+        if file.is_file()
+        and file.suffix in {".bin", ".pt", ".safetensors"}
+    )
+    if not files:
+        print(f"No model weight files found to cache at {model_path}")
+        return 0
+
+    workers = num_workers or min(multiprocessing.cpu_count(), 8)
+    chunk_size = chunk_mb * 1024 * 1024
+
+    def warm_file(file: Path) -> int:
+        total = 0
+        with file.open("rb") as handle:
+            while data := handle.read(chunk_size):
+                total += len(data)
+        return total
+
+    print(f"Caching {len(files)} model files with {workers} workers")
+    started = time.time()
+    total_bytes = 0
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(warm_file, file) for file in files]
+        for future in as_completed(futures):
+            total_bytes += future.result()
+    elapsed = time.time() - started
+    print(
+        f"Cached {total_bytes / 1024**3:.2f} GiB in {elapsed:.2f}s"
+    )
+    return total_bytes
+
+
+def build_vllm_engine(
+        model_path: Path | str = MODEL_PATH,
+        tensor_parallel_size: int = TENSOR_PARALLEL_SIZE,
+        max_num_seqs: int = MAX_NUM_SEQS,
+        gpu_memory_utilization: float = GPU_MEMORY_UTILIZATION,
+        max_model_len: int = MAX_MODEL_LEN,
+        max_lora_rank: int = MAX_LORA_RANK,
+        enable_prefix_caching: bool = ENABLE_PREFIX_CACHING,
+        enable_chunked_prefill: bool = ENABLE_CHUNKED_PREFILL,
+        seed: int = SEED,
+        n: int = TRAJECTORIES,
+        temperature: float = TEMPERATURE,
+        top_p: float = TOP_P,
+        max_tokens: int = MAX_TOKENS,
+        lora_path: Path | str = LORA_PATH,
+        cache_model_weights: bool = CACHE_MODEL_WEIGHTS,
+        cache_model_workers: int = CACHE_MODEL_WORKERS,
+        cache_model_chunk_mb: int = CACHE_MODEL_CHUNK_MB,
+):
+    if cache_model_weights:
+        cache_model(
+            model_path,
+            num_workers=cache_model_workers,
+            chunk_mb=cache_model_chunk_mb,
+        )
+
+    os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+    os.environ.setdefault("TRANSFORMERS_NO_FLAX", "1")
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
+
+    from vllm import LLM, SamplingParams
+    from vllm.lora.request import LoRARequest
+
+    llm = LLM(
+        model=str(model_path),
+        tensor_parallel_size=tensor_parallel_size,
+        max_num_seqs=max_num_seqs,
+        gpu_memory_utilization=gpu_memory_utilization,
+        dtype="auto",
+        max_model_len=max_model_len,
+        trust_remote_code=True,
+        enable_lora=True,
+        max_lora_rank=max_lora_rank,
+        enable_prefix_caching=enable_prefix_caching,
+        enable_chunked_prefill=enable_chunked_prefill,
+        seed=seed,
+    )
+    sampling_params = SamplingParams(
+        n=n,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        seed=seed,
+    )
+    lora_request = LoRARequest("adapter", 1, str(lora_path))
+    return llm, sampling_params, lora_request
+
+
+def format_generation_prompts(tokenizer: Any, prompts: list[str]) -> list[str]:
+    formatted = []
+    for prompt in prompts:
+        user_content = f"{prompt}{BOXED_ANSWER_INSTRUCTION}"
+        messages = [{"role": "user", "content": user_content}]
+        try:
+            rendered = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=True,
+            )
+        except TypeError:
+            rendered = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        except Exception:
+            rendered = user_content
+        formatted.append(rendered)
+    return formatted
+
+
+# %%
+def backup_path(split_name: str) -> Path:
+    return BACKUP_DIR / f"{split_name}.csv"
+
+
+def append_backup_records(split_name: str, records: list[dict[str, Any]]) -> None:
+    if not DEBUG_CSV_BACKUP or not records:
+        return
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    path = backup_path(split_name)
+    write_header = not path.exists() or path.stat().st_size == 0
+    with path.open("a", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=BACKUP_FIELDS)
+        if write_header:
+            writer.writeheader()
+        writer.writerows(records)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def apply_batch_updates(
+    dataset,
+    updates: dict[int, dict[str, Any]],
+    split_name: str,
+):
+    def apply_update(example: dict[str, Any]) -> dict[str, Any]:
+        row_index = int(example["dpo_row_index"])
+        update = updates.get(row_index)
+        if update is None:
+            return {}
+        return update
+
+    return dataset.map(
+        apply_update,
+        num_proc=DATASET_NUM_PROC,
+        desc=f"{split_name}: apply generated preferences",
+        keep_in_memory=KEEP_IN_MEMORY,
+    )
+
+
+def process_split(
+    split_name: str,
+    split_dataset,
+    candidates,
+    llm: Any,
+    sampling_params: Any,
+    lora_request: Any,
+):
+    from tqdm.auto import tqdm
+
+    if not len(candidates):
+        print(f"{split_name}: all candidates already processed")
+        return split_dataset
+
+    tokenizer = llm.get_tokenizer()
+    progress = tqdm(
+        range(0, len(candidates), PROMPT_BATCH_SIZE),
+        desc=f"{split_name}: vLLM batches",
+    )
+    for offset in progress:
+        batch = candidates.select(
+            range(offset, min(offset + PROMPT_BATCH_SIZE, len(candidates)))
+        )
+        prompts = [str(prompt) for prompt in batch["prompt"]]
+        formatted_prompts = format_generation_prompts(tokenizer, prompts)
+        generated = llm.generate(
+            formatted_prompts,
+            sampling_params=sampling_params,
+            lora_request=lora_request,
+        )
+        if len(generated) != len(batch):
+            raise RuntimeError(
+                f"{split_name}: vLLM returned {len(generated)} outputs "
+                f"for {len(batch)} prompts"
+            )
+
+        backup_rows = []
+        updates = {}
+        for example, request_output in zip(batch, generated):
+            trajectory_outputs = [
+                candidate.text
+                for candidate in request_output.outputs
+            ]
+            if len(trajectory_outputs) != TRAJECTORIES:
+                raise RuntimeError(
+                    f"{split_name} row {example['dpo_row_index']}: expected "
+                    f"{TRAJECTORIES} trajectories, received "
+                    f"{len(trajectory_outputs)}"
+                )
+            preference = select_preference(example, trajectory_outputs)
+            row_index = int(example["dpo_row_index"])
+            update = {
+                "chosen": preference["chosen"],
+                "rejected": preference["rejected"],
+                "dpo_selected": True,
+                "dpo_processed": True,
+            }
+            if clean_text(example.get("response")) is None:
+                generated_reasoning, generated_response = split_think_content(
+                    preference["chosen"]
+                )
+                update["reasoning"] = generated_reasoning
+                update["response"] = generated_response
+            updates[row_index] = update
+            backup_rows.append(
+                {
+                    "split": split_name,
+                    "row_index": row_index,
+                    "id": clean_text(example.get("id")) or "",
+                    "prompt": clean_text(example.get("prompt")) or "",
+                    "stored_answer": clean_text(example.get("final_answer")) or "",
+                    "had_response": clean_text(example.get("response")) is not None,
+                    "chosen": preference["chosen"] or "",
+                    "rejected": preference["rejected"] or "",
+                    "trajectory_outputs": json.dumps(
+                        trajectory_outputs if BACKUP_TRAJECTORIES else [],
+                        ensure_ascii=False,
+                    ),
+                    "trajectory_answers": json.dumps(
+                        preference["trajectory_answers"],
+                        ensure_ascii=False,
+                    ),
+                    "trajectory_correct": json.dumps(
+                        preference["trajectory_correct"],
+                    ),
+                }
+            )
+        split_dataset = apply_batch_updates(
+            split_dataset,
+            updates,
+            split_name,
+        )
+        persist_incremental_split(split_dataset, split_name)
+        append_backup_records(split_name, backup_rows)
+        processed_count = sum(split_dataset["dpo_processed"])
+        progress.set_postfix(processed=processed_count)
+    return split_dataset
+
+
+def save_and_upload(
+        dataset_dict, 
+        upload_to_hf: bool = UPLOAD_TO_HF,
+        upload_to_kaggle: bool = UPLOAD_TO_KAGGLE, 
+) -> None:
+    LOCAL_OUTPUT_DIR.parent.mkdir(parents=True, exist_ok=True)
+    dataset_dict.save_to_disk(
+        str(LOCAL_OUTPUT_DIR),
+        num_proc=DATASET_NUM_PROC,
+    )
+    print(f"Saved updated dataset to {LOCAL_OUTPUT_DIR}")
+
+    if upload_to_hf:
+        try:
+            if not HF_KEY:
+                raise RuntimeError(
+                    "UPLOAD_TO_HF=1 but HF_KEY/HF_TOKEN is not configured"
+                )
+            dataset_dict.push_to_hub(
+                f"{HF_UPLOAD_USERNAME}/{DATASET_TAG}",
+                private=True,
+                token=HF_KEY,
+            )
+        except Exception as error:
+            print(f"Upload to Hugging Face failed: {error}")
+        else:
+            print(f"Upload to Hugging Face succeeded")
+
+    if upload_to_kaggle:
+        try:
+            if not KAGGLE_USERNAME or not KAGGLE_KEY:
+                raise RuntimeError(
+                    "UPLOAD_TO_KAGGLE=1 but KAGGLE_USERNAME/KAGGLE_KEY is not configured"
+                )
+            import kagglehub
+
+            KAGGLE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            for split_name, split_dataset in dataset_dict.items():
+                split_dataset.to_parquet(
+                    KAGGLE_OUTPUT_DIR / f"{split_name}.parquet"
+                )
+            kagglehub.dataset_upload(
+                handle=f"{KAGGLE_USERNAME}/{DATASET_TAG}",
+                local_dataset_dir=str(KAGGLE_OUTPUT_DIR),
+            )
+        except Exception as error:
+            print(f"Upload to Kaggle failed: {error}")
+        else:
+            print(f"Upload to Kaggle succeeded")
+
+
+# %%
+model_path = Path(MODEL_PATH)
+lora_path = Path(LORA_PATH)
+if not model_path.exists():
+    raise FileNotFoundError(f"Base model path does not exist: {model_path}")
+if not (lora_path / "adapter_config.json").exists():
+    raise FileNotFoundError(
+        f"LoRA adapter_config.json does not exist under {lora_path}"
+    )
+
+# %%
+dataset_dict = load_reasoning_dataset()
+available_splits = [
+    split_name
+    for split_name in SPLIT_NAMES
+    if split_name in dataset_dict
+]
+if not available_splits:
+    raise ValueError(
+        f"None of {SPLIT_NAMES} exist in dataset: {list(dataset_dict)}"
+    )
+
+# %%
+candidates_by_split = {}
+for split_name in available_splits:
+    updated_split, candidates = select_generation_candidates(
+        dataset_dict[split_name],
+        split_name,
+    )
+    dataset_dict[split_name] = updated_split
+    candidates_by_split[split_name] = candidates
+
+# %%
+has_candidates = any(
+    len(candidates)
+    for candidates in candidates_by_split.values()
+)
+if has_candidates:
+    llm, sampling_params, lora_request = build_vllm_engine()
+else:
+    llm = sampling_params = lora_request = None
+    print("No prompts require preference generation")
+
+# %%
+if has_candidates:
+    for split_name in available_splits:
+        candidates = candidates_by_split[split_name]
+        if not len(candidates):
+            continue
+        dataset_dict[split_name] = process_split(
+            split_name,
+            dataset_dict[split_name],
+            candidates,
+            llm,
+            sampling_params,
+            lora_request,
+        )
+
+# %%
+save_and_upload(dataset_dict)

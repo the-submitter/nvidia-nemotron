@@ -1083,6 +1083,8 @@ def main() -> None:
             )
         except Exception as e:
             print(f"Upload to HF failed: {e}")
+        else:
+            print(f"Upload to HF succeeded")
 
     if UPLOAD_TO_KAGGLE:
         try:
@@ -1113,6 +1115,8 @@ def main() -> None:
             )
         except Exception as e:
             print(f"Upload to Kaggle failed: {e}")
+        else:
+            print(f"Upload to Kaggle succeeded")
 
 
 # %%

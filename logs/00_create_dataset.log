@@ -1,0 +1,76 @@
+Preparing AI-MO/NuminaMath-1.5 (15,600 records)
+{'train': 15400, 'validation': 100, 'test': 100}
+
+Preparing qwedsacf/competition_math (7,800 records)
+{'train': 7700, 'validation': 50, 'test': 50}
+
+Preparing open-r1/OpenR1-Math-220k (15,600 records)
+{'train': 15400, 'validation': 100, 'test': 100}
+
+Preparing openai/gsm8k (3,060 records)
+{'train': 3000, 'validation': 30, 'test': 30}
+
+Preparing ChilleD/SVAMP (14 records)
+{'train': 10, 'validation': 2, 'test': 2}
+
+Preparing EleutherAI/asdiv (36 records)
+{'train': 30, 'validation': 3, 'test': 3}
+
+Preparing EleutherAI/drop (15,600 records)
+{'train': 15400, 'validation': 100, 'test': 100}
+
+Preparing tasksource/proofwriter (7,800 records)
+{'train': 7700, 'validation': 50, 'test': 50}
+
+Preparing yale-nlp/FOLIO (1,000 records)
+{'train': 980, 'validation': 10, 'test': 10}
+
+Preparing renma/ProntoQA (108 records)
+{'train': 100, 'validation': 4, 'test': 4}
+
+Preparing WildEval/ZebraLogic (1,928 records)
+{'train': 1890, 'validation': 19, 'test': 19}
+
+Preparing BytedTsinghua-SIA/Enigmata-Eval (4,758 records)
+{'train': 4666, 'validation': 46, 'test': 46}
+
+Preparing nvidia/OpenMathReasoning (18,472 records)
+nvidia/OpenMathReasoning: materialize dataset stream: 3201061it [27:27, 1942.75it/s, eligible=3,200,999, retained=18,472]
+nvidia/OpenMathReasoning: materialized 18,472 ranked rows in RAM from 3,201,061 streamed rows
+{'train': 18110, 'validation': 181, 'test': 181}
+
+Preparing /kaggle/input/competitions/nvidia-nemotron-model-reasoning-challenge (9,500 records)
+{'train': 9310, 'validation': 95, 'test': 95}
+Validated split sizes: {'train': 99696, 'validation': 790, 'test': 790}
+DatasetDict({
+    train: Dataset({
+        features: ['id', 'source', 'domain', 'prompt', 'reasoning', 'response', 'final_answer', 'answer_type', 'difficulty'],
+        num_rows: 99696
+    })
+    validation: Dataset({
+        features: ['id', 'source', 'domain', 'prompt', 'reasoning', 'response', 'final_answer', 'answer_type', 'difficulty'],
+        num_rows: 790
+    })
+    test: Dataset({
+        features: ['id', 'source', 'domain', 'prompt', 'reasoning', 'response', 'final_answer', 'answer_type', 'difficulty'],
+        num_rows: 790
+    })
+})
+Saved dataset to /kaggle/working/nemotron-reasoning
+Setting num_proc from 1 back to 1 for the train split to disable multiprocessing as it only contains one shard.
+Setting num_proc from 1 back to 1 for the validation split to disable multiprocessing as it only contains one shard.
+Setting num_proc from 1 back to 1 for the test split to disable multiprocessing as it only contains one shard.
+Uploading Dataset https://api.kaggle.com/datasets/rohitraje0493/nemotron-reasoning ...
+Starting upload for file /tmp/kagglehub/nemotron-reasoning/test.parquet
+Warning: Looks like you're using an outdated `kagglehub` version (installed: 1.0.0), please consider upgrading to the latest version (1.0.2)
+Uploading: 100%|██████████| 653k/653k [00:01<00:00, 437kB/s]
+Upload successful: /tmp/kagglehub/nemotron-reasoning/test.parquet (637KB)
+Starting upload for file /tmp/kagglehub/nemotron-reasoning/train.parquet
+Uploading: 100%|██████████| 81.0M/81.0M [00:05<00:00, 15.8MB/s]
+Upload successful: /tmp/kagglehub/nemotron-reasoning/train.parquet (77MB)
+Starting upload for file /tmp/kagglehub/nemotron-reasoning/validation.parquet
+Uploading: 100%|██████████| 639k/639k [00:01<00:00, 431kB/s]
+Upload successful: /tmp/kagglehub/nemotron-reasoning/validation.parquet (624KB)
+Your dataset version has been created.
+Files are being processed...
+See at: https://api.kaggle.com/datasets/rohitraje0493/nemotron-reasoning
