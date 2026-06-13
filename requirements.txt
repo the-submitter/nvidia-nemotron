@@ -8,7 +8,7 @@ uv
 triton>=3.3.0
 torchvision==0.25.0+cu128
 bitsandbytes
-transformers>=4.56.2
+transformers>=4.56.2,<5.0.0
 tokenizers>=0.22.0,<=0.23.0
 trl>=0.22.2
 unsloth

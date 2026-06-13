@@ -47,31 +47,31 @@ wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
 #     unsloth_zoo \
 #     --no-index --find-links={wheels_dir}
 # !uv pip install --no-deps "torchcodec==0.10.0+cu128" --no-index --find-links={wheels_dir}
-# !uv pip install \
-#     mamba_ssm \
-#     causal_conv1d \
-#     --no-index --find-links={wheels_dir}
-# !uv pip install --no-deps --upgrade \
-#     "torchao>=0.16.0" \
+# !uv pip install mamba_ssm causal_conv1d --no-index --find-links={wheels_dir}
+# !uv pip install --no-deps --upgrade "torchao>=0.16.0" \
 #     --no-index --find-links={wheels_dir}
 # # !uv pip install vllm --no-index --find-links={wheels_dir}
 # # !uv pip install "protobuf<6.0.0" --no-index --find-links={wheels_dir}
 
 # %%
 WORKING_DIR = Path(os.environ.get("WORKING_DIR", "/kaggle/working"))
-MODEL_PATH = os.environ.get(
-    "MODEL_PATH",
-    "/kaggle/input/models/metric/nemotron-3-nano-30b-a3b-bf16/transformers/default/1",
-    # "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/default/1",
+SFT_ADAPTER_PATH = os.environ.get(
+    "SFT_ADAPTER_PATH",
+    "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/lora-sft/1",
+)
+BASE_MODEL_PATH = os.environ.get(
+    "BASE_MODEL_PATH",
+    "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/default/1",
 )
 BASE_MODEL_ID = os.environ.get(
     "BASE_MODEL_ID", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16",
 )
 DATASET_PATH = os.environ.get(
     "DATASET_PATH",
-    "/kaggle/input/datasets/rohitraje0493/nemotron-reasoning",
+    "/kaggle/input/datasets/rohitraje0493/nemotron-reasoning-dpo",
 )
 DATASET_REVISION = os.environ.get("DATASET_REVISION")
+HF_CACHE_DIR = Path(os.environ.get("HF_CACHE_DIR", "/tmp/hf_cache"))
 TRAIN_SPLIT = os.environ.get("TRAIN_SPLIT", "train")
 EVAL_SPLIT = os.environ.get("EVAL_SPLIT", "validation")
 
@@ -84,47 +84,58 @@ def optional_nonnegative_int(name: str, default: Optional[int] = None) -> Option
         raise ValueError(f"{name} must be a non-negative integer or None")
     return parsed
 
-TRAIN_MIN_IDX = optional_nonnegative_int("TRAIN_MIN_IDX", 0)
-TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX", 7830)
-EVAL_MIN_IDX = optional_nonnegative_int("EVAL_MIN_IDX", 15)
-EVAL_MAX_IDX = optional_nonnegative_int("EVAL_MAX_IDX", 35)
+TRAIN_MIN_IDX = optional_nonnegative_int("TRAIN_MIN_IDX")
+TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX")
+EVAL_MIN_IDX = optional_nonnegative_int("EVAL_MIN_IDX")
+EVAL_MAX_IDX = optional_nonnegative_int("EVAL_MAX_IDX")
 
-LORA_STAGE = os.environ.get("LORA_STAGE", "sft")
-LORA_VERSION = os.environ.get("LORA_VERSION", "v1")
-RUN_NAME = os.environ.get("RUN_NAME", f"nemotron-{LORA_STAGE}-{LORA_VERSION}")
+DPO_STAGE = os.environ.get("DPO_STAGE", "dpo")
+DPO_VERSION = os.environ.get("DPO_VERSION", "v1")
+RUN_NAME = os.environ.get("RUN_NAME", f"nemotron-{DPO_STAGE}-{DPO_VERSION}")
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", str(WORKING_DIR / RUN_NAME)))
 ADAPTER_OUTPUT_DIR = Path(
     os.environ.get(
         "ADAPTER_OUTPUT_DIR",
-        str(WORKING_DIR / f"nemotron-lora-{LORA_STAGE}-{LORA_VERSION}"),
+        str(WORKING_DIR / f"nemotron-lora-{DPO_STAGE}-{DPO_VERSION}"),
     )
 )
-ADAPTER_INPUT_PATH = os.environ.get("ADAPTER_INPUT_PATH")
 HF_USERNAME = os.environ.get("HF_USERNAME", "the-submitter")
 HF_ADAPTER_REPO = os.environ.get(
     "HF_ADAPTER_REPO",
-    f"{HF_USERNAME}/nemotron-lora-{LORA_STAGE}-{LORA_VERSION}",
+    f"{HF_USERNAME}/nemotron-lora-{DPO_STAGE}-{DPO_VERSION}",
 )
 KAGGLE_ADAPTER_REPO = os.environ.get(
     "KAGGLE_ADAPTER_REPO",
-    f"{KAGGLE_USERNAME}/nemotron-3-nano/transformers/lora-{LORA_STAGE}",
+    f"{KAGGLE_USERNAME}/nemotron-3-nano/transformers/lora-{DPO_STAGE}",
 )
 KAGGLE_DATASET_REPO = os.environ.get(
     "KAGGLE_DATASET_REPO",
-    f"{KAGGLE_USERNAME}/nemotron-{LORA_STAGE}",
+    f"{KAGGLE_USERNAME}/nemotron-{DPO_STAGE}",
 )
 
 MAX_SEQ_LENGTH = int(os.environ.get("MAX_SEQ_LENGTH", "8192"))
+MAX_PROMPT_LENGTH = int(os.environ.get("MAX_PROMPT_LENGTH", "4096"))
+MAX_COMPLETION_LENGTH = optional_nonnegative_int("MAX_COMPLETION_LENGTH")
+# if MAX_COMPLETION_LENGTH is None:
+#     MAX_COMPLETION_LENGTH = MAX_SEQ_LENGTH - MAX_PROMPT_LENGTH
+# if MAX_PROMPT_LENGTH <= 0 or MAX_COMPLETION_LENGTH <= 0:
+#     raise ValueError("Prompt and completion lengths must be positive")
+# if MAX_PROMPT_LENGTH + MAX_COMPLETION_LENGTH > MAX_SEQ_LENGTH:
+#     raise ValueError(
+#         "MAX_PROMPT_LENGTH + MAX_COMPLETION_LENGTH must not exceed "
+#         "MAX_SEQ_LENGTH"
+#     )
+
 DATASET_WORKERS = max(1, int(os.environ.get("DATASET_NUM_PROC", "8")))
 DATASET_NUM_PROC = DATASET_WORKERS if DATASET_WORKERS > 1 else None
 SEED = int(os.environ.get("SEED", "3407"))
 
 PER_DEVICE_TRAIN_BATCH_SIZE = int(
-    os.environ.get("PER_DEVICE_TRAIN_BATCH_SIZE", "3")
+    os.environ.get("PER_DEVICE_TRAIN_BATCH_SIZE", "1")
 )
-PER_DEVICE_EVAL_BATCH_SIZE = int(os.environ.get("PER_DEVICE_EVAL_BATCH_SIZE", "3"))
+PER_DEVICE_EVAL_BATCH_SIZE = int(os.environ.get("PER_DEVICE_EVAL_BATCH_SIZE", "1"))
 GRADIENT_ACCUMULATION_STEPS = int(
-    os.environ.get("GRADIENT_ACCUMULATION_STEPS", "10")
+    os.environ.get("GRADIENT_ACCUMULATION_STEPS", "16")
 )
 NUM_TRAIN_EPOCHS = float(os.environ.get("NUM_TRAIN_EPOCHS", "1"))
 MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))
@@ -135,19 +146,23 @@ SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "50"))
 EVAL_STEPS = int(os.environ.get("EVAL_STEPS", str(SAVE_STEPS)))
 SAVE_TOTAL_LIMIT = int(os.environ.get("SAVE_TOTAL_LIMIT", "2"))
 
-LORA_R = int(os.environ.get("LORA_R", "32"))
-LORA_ALPHA = int(os.environ.get("LORA_ALPHA", "32"))
+DPO_BETA = float(os.environ.get("DPO_BETA", "0.1"))
+DPO_LOSS_TYPE = os.environ.get("DPO_LOSS_TYPE", "sigmoid")
+PRECOMPUTE_REF_LOG_PROBS = os.environ.get(
+    "PRECOMPUTE_REF_LOG_PROBS",
+    "1",
+).lower() in {"1", "true", "yes"}
 REPORT_TO = os.environ.get("REPORT_TO", "wandb")
-RESUME_FROM_CHECKPOINT = os.environ.get("RESUME_FROM_CHECKPOINT", "0")
-PUSH_TO_HUB = os.environ.get("PUSH_TO_HUB", "0").lower() not in {
-    "0",
-    "false",
-    "no",
+RESUME_FROM_CHECKPOINT = os.environ.get("RESUME_FROM_CHECKPOINT")
+PUSH_TO_HUB = os.environ.get("PUSH_TO_HUB", "0").lower() in {
+    "1",
+    "true",
+    "yes",
 }
-PUSH_TO_KAGGLE = os.environ.get("PUSH_TO_KAGGLE", "0").lower() not in {
-    "0",
-    "false",
-    "no",
+PUSH_TO_KAGGLE = os.environ.get("PUSH_TO_KAGGLE", "0").lower() in {
+    "1",
+    "true",
+    "yes",
 }
 KEEP_IN_MEMORY = os.environ.get("KEEP_IN_MEMORY", "1").lower() not in {
     "0",
@@ -159,20 +174,13 @@ BOXED_ANSWER_INSTRUCTION = (
     "\nPlease put your final answer inside `\\boxed{}`. "
     "For example: `\\boxed{your answer}`"
 )
-INSTRUCTION_PART = os.environ.get(
-    "INSTRUCTION_PART",
-    "<|im_start|>user\n",
-)
-RESPONSE_PART = os.environ.get(
-    "RESPONSE_PART",
-    "<|im_start|>assistant\n",
-)
 
 if REPORT_TO == "wandb":
-    os.environ["WANDB_MODE"] = "offline"
-    os.environ["WANDB_DIR"] = "/kaggle/working/wandb_logs"
-    os.environ["WANDB_SILENT"] = "true"
-    os.makedirs("/kaggle/working/wandb_logs", exist_ok=True)
+    os.environ.setdefault("WANDB_MODE", "offline")
+    wandb_dir = Path(os.environ.get("WANDB_DIR", str(WORKING_DIR / "wandb_logs")))
+    wandb_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["WANDB_DIR"] = str(wandb_dir)
+    os.environ.setdefault("WANDB_SILENT", "true")
 
 
 # %%
@@ -183,80 +191,50 @@ def clean_text(value: Any) -> Optional[str]:
     return text or None
 
 
-def is_trainable_example(example: dict[str, Any]) -> bool:
+def is_preference_example(example: dict[str, Any]) -> bool:
     return (
         clean_text(example.get("prompt")) is not None
-        and clean_text(example.get("response")) is not None
+        and clean_text(example.get("chosen")) is not None
+        and clean_text(example.get("rejected")) is not None
     )
 
 
 def build_user_content(prompt: Any) -> str:
     normalized_prompt = clean_text(prompt)
     if normalized_prompt is None:
-        raise ValueError("Cannot build a conversation without a prompt")
+        raise ValueError("Cannot format DPO data without a prompt")
     return normalized_prompt + BOXED_ANSWER_INSTRUCTION
 
 
-def build_conversation(example: dict[str, Any]) -> dict[str, Any]:
-    response = clean_text(example.get("response"))
-    if response is None:
-        raise ValueError("Dataset must be filtered before conversation formatting")
-
-    assistant_message = {
-        "role": "assistant",
-        "content": response,
-    }
-    reasoning = clean_text(example.get("reasoning"))
-    if reasoning is not None:
-        assistant_message["reasoning_content"] = reasoning
-
-    return {
-        "conversations": [
-            {
-                "role": "user",
-                "content": build_user_content(example.get("prompt")),
-            },
-            assistant_message,
-        ]
-    }
-
-
-def render_conversations(
-    examples: dict[str, list[Any]],
+def render_dpo_example(
+    example: dict[str, Any],
     tokenizer: Any,
-) -> dict[str, list[str]]:
-    texts = []
-    for conversation in examples["conversations"]:
-        text = tokenizer.apply_chat_template(
-            conversation,
-            tokenize=False,
-            add_generation_prompt=False,
-        )
-        assistant_message = conversation[-1]
-        reasoning = clean_text(assistant_message.get("reasoning_content"))
-        if reasoning is not None and reasoning not in text:
-            fallback_conversation = [
-                dict(message)
-                for message in conversation
-            ]
-            fallback_assistant = dict(fallback_conversation[-1])
-            fallback_assistant.pop("reasoning_content", None)
-            fallback_assistant["content"] = (
-                f"<think>\n{reasoning}\n</think>\n"
-                f"{fallback_assistant['content']}"
-            )
-            fallback_conversation[-1] = fallback_assistant
-            text = tokenizer.apply_chat_template(
-                fallback_conversation,
-                tokenize=False,
-                add_generation_prompt=False,
-            )
-        texts.append(text)
-    return {"text": texts}
+) -> dict[str, str]:
+    chosen = clean_text(example.get("chosen"))
+    rejected = clean_text(example.get("rejected"))
+    if chosen is None or rejected is None:
+        raise ValueError("Dataset must be filtered before DPO formatting")
+
+    prompt_messages = [
+        {
+            "role": "user",
+            "content": build_user_content(example.get("prompt")),
+        }
+    ]
+    prompt = tokenizer.apply_chat_template(
+        prompt_messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    return {
+        "prompt": prompt,
+        "chosen": chosen,
+        "rejected": rejected,
+    }
 
 
 # %%
-def load_reasoning_dataset():
+def load_preference_dataset():
     from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
 
     dataset_path = Path(DATASET_PATH)
@@ -278,6 +256,7 @@ def load_reasoning_dataset():
             loaded = load_dataset(
                 "parquet",
                 data_dir=str(dataset_path),
+                cache_dir=str(HF_CACHE_DIR),
                 keep_in_memory=KEEP_IN_MEMORY,
             )
     else:
@@ -285,6 +264,7 @@ def load_reasoning_dataset():
             DATASET_PATH,
             revision=DATASET_REVISION,
             token=HF_KEY,
+            cache_dir=str(HF_CACHE_DIR),
             keep_in_memory=KEEP_IN_MEMORY,
         )
 
@@ -298,38 +278,31 @@ def load_reasoning_dataset():
     return loaded
 
 
-def prepare_split(dataset, tokenizer, split_name: str, already_filtered: bool = False):
+def prepare_split(dataset, tokenizer, split_name: str):
     original_size = len(dataset)
-    if not already_filtered:
-        dataset = dataset.filter(
-            is_trainable_example,
-            num_proc=DATASET_NUM_PROC,
-            desc=f"{split_name}: keep non-empty responses",
-            keep_in_memory=KEEP_IN_MEMORY,
-        )
-    if not len(dataset):
-        raise ValueError(f"{split_name} has no examples with non-empty responses")
-
-    dataset = dataset.map(
-        build_conversation,
-        remove_columns=dataset.column_names,
+    dataset = dataset.filter(
+        is_preference_example,
         num_proc=DATASET_NUM_PROC,
-        desc=f"{split_name}: build conversations",
+        desc=f"{split_name}: keep complete preferences",
         keep_in_memory=KEEP_IN_MEMORY,
     )
-    conversation_features = dataset.features
+    if not len(dataset):
+        raise ValueError(
+            f"{split_name} has no examples with non-empty chosen and rejected"
+        )
+
     dataset = dataset.map(
-        render_conversations,
-        batched=True,
+        render_dpo_example,
         fn_kwargs={"tokenizer": tokenizer},
         remove_columns=dataset.column_names,
         num_proc=DATASET_NUM_PROC,
-        desc=f"{split_name}: apply chat template",
+        desc=f"{split_name}: apply DPO chat template",
         keep_in_memory=KEEP_IN_MEMORY,
     )
-    if dataset.features == conversation_features or "text" not in dataset.column_names:
-        raise RuntimeError(f"{split_name}: chat-template formatting did not create text")
-
+    if dataset.column_names != ["prompt", "chosen", "rejected"]:
+        raise RuntimeError(
+            f"{split_name}: unexpected DPO columns {dataset.column_names}"
+        )
     print(f"{split_name}: retained {len(dataset):,}/{original_size:,} examples")
     return dataset
 
@@ -367,7 +340,7 @@ def select_index_range(
 
 
 def prepare_datasets(tokenizer):
-    dataset_dict = load_reasoning_dataset()
+    dataset_dict = load_preference_dataset()
     train_dataset = prepare_split(
         dataset_dict[TRAIN_SPLIT],
         tokenizer,
@@ -383,23 +356,29 @@ def prepare_datasets(tokenizer):
     eval_dataset = None
     if EVAL_SPLIT in dataset_dict and len(dataset_dict[EVAL_SPLIT]):
         filtered_eval = dataset_dict[EVAL_SPLIT].filter(
-            is_trainable_example,
+            is_preference_example,
             num_proc=DATASET_NUM_PROC,
-            desc=f"{EVAL_SPLIT}: check non-empty responses",
+            desc=f"{EVAL_SPLIT}: check complete preferences",
             keep_in_memory=KEEP_IN_MEMORY,
         )
         if len(filtered_eval):
-            eval_dataset = prepare_split(
-                filtered_eval,
-                tokenizer,
-                EVAL_SPLIT,
-                already_filtered=True,
+            eval_dataset = filtered_eval.map(
+                render_dpo_example,
+                fn_kwargs={"tokenizer": tokenizer},
+                remove_columns=filtered_eval.column_names,
+                num_proc=DATASET_NUM_PROC,
+                desc=f"{EVAL_SPLIT}: apply DPO chat template",
+                keep_in_memory=KEEP_IN_MEMORY,
             )
             eval_dataset = select_index_range(
                 eval_dataset,
                 EVAL_MIN_IDX,
                 EVAL_MAX_IDX,
                 EVAL_SPLIT,
+            )
+            print(
+                f"{EVAL_SPLIT}: retained {len(eval_dataset):,}/"
+                f"{len(dataset_dict[EVAL_SPLIT]):,} examples"
             )
     return train_dataset, eval_dataset
 
@@ -408,9 +387,14 @@ def prepare_datasets(tokenizer):
 def load_model_and_tokenizer():
     from unsloth import FastLanguageModel
 
-    model_source = ADAPTER_INPUT_PATH or MODEL_PATH
+    adapter_path = Path(SFT_ADAPTER_PATH)
+    if not (adapter_path / "adapter_config.json").exists():
+        raise FileNotFoundError(
+            f"SFT LoRA adapter_config.json does not exist under {adapter_path}"
+        )
+
     model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=model_source,
+        model_name=str(adapter_path),
         max_seq_length=MAX_SEQ_LENGTH,
         load_in_4bit=False,
         load_in_8bit=False,
@@ -420,40 +404,23 @@ def load_model_and_tokenizer():
         attn_implementation="eager",
         token=HF_KEY,
         use_gradient_checkpointing="unsloth",
-        # unsloth_tiled_mlp=True,
         gpu_memory_utilization=0.95,
     )
-
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
-    if ADAPTER_INPUT_PATH is None:
-        model = FastLanguageModel.get_peft_model(
-            model,
-            r=LORA_R,
-            finetune_language_layers=True,
-            finetune_attention_modules=True,
-            finetune_mlp_modules=True,
-            target_modules=[
-                "q_proj",
-                "k_proj",
-                "v_proj",
-                "o_proj",
-                "gate_proj",
-                "up_proj",
-                "down_proj",
-                "in_proj",
-                "out_proj",
-            ],
-            lora_alpha=LORA_ALPHA,
-            lora_dropout=0,
-            bias="none",
-            use_gradient_checkpointing="unsloth",
-            random_state=SEED,
-            use_rslora=False,
-            loftq_config=None,
+    trainable_parameters = sum(
+        parameter.numel()
+        for parameter in model.parameters()
+        if parameter.requires_grad
+    )
+    if trainable_parameters == 0:
+        raise RuntimeError(
+            "The SFT adapter loaded without trainable parameters; "
+            "DPO would not update the existing LoRA"
         )
+    print(f"Trainable adapter parameters: {trainable_parameters:,}")
     return model, tokenizer
 
 
@@ -474,13 +441,15 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 ADAPTER_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-from unsloth import FastLanguageModel  # noqa: F401
+from unsloth import FastLanguageModel, PatchDPOTrainer  # noqa: F401
+
+PatchDPOTrainer()
+
 import torch
-from trl import SFTConfig, SFTTrainer
-from unsloth.chat_templates import train_on_responses_only
+from trl import DPOConfig, DPOTrainer
 
 if not torch.cuda.is_available():
-    raise RuntimeError("SFT training requires a CUDA GPU")
+    raise RuntimeError("DPO training requires a CUDA GPU")
 
 # %%
 model, tokenizer = load_model_and_tokenizer()
@@ -492,16 +461,18 @@ train_dataset, eval_dataset = prepare_datasets(tokenizer)
 has_eval = eval_dataset is not None and len(eval_dataset) > 0
 bf16 = torch.cuda.is_bf16_supported()
 
-trainer = SFTTrainer(
+dpo_trainer = DPOTrainer(
     model=model,
+    ref_model=None,
     processing_class=tokenizer,
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
-    args=SFTConfig(
+    args=DPOConfig(
         output_dir=str(OUTPUT_DIR),
         run_name=RUN_NAME,
-        dataset_text_field="text",
         max_length=MAX_SEQ_LENGTH,
+        max_prompt_length=MAX_PROMPT_LENGTH,
+        max_completion_length=MAX_COMPLETION_LENGTH,
         dataset_num_proc=DATASET_WORKERS,
         per_device_train_batch_size=PER_DEVICE_TRAIN_BATCH_SIZE,
         per_device_eval_batch_size=PER_DEVICE_EVAL_BATCH_SIZE,
@@ -525,7 +496,7 @@ trainer = SFTTrainer(
         greater_is_better=False if has_eval else None,
         optim="adamw_8bit",
         adam_beta1=0.9,
-        adam_beta2=0.95,
+        adam_beta2=0.999,
         adam_epsilon=1e-8,
         weight_decay=0.0,
         lr_scheduler_type="cosine",
@@ -536,28 +507,21 @@ trainer = SFTTrainer(
         fp16=not bf16,
         tf32=None,
         padding_free=False,
-        packing=False,
-        packing_strategy="bfd",
+        beta=DPO_BETA,
+        loss_type=[DPO_LOSS_TYPE],
+        precompute_ref_log_probs=PRECOMPUTE_REF_LOG_PROBS,
         max_grad_norm=1e9,
-        # remove_unused_columns=True,
-        # assistant_only_loss=True,
-        # completion_only_loss=True,
-        # dataset_kwargs = {"skip_prepare_dataset": True},
     ),
-)
-trainer = train_on_responses_only(
-    trainer,
-    instruction_part=INSTRUCTION_PART,
-    response_part=RESPONSE_PART,
 )
 
 # %%
-sample = trainer.train_dataset[0]
-if not any(label != -100 for label in sample["labels"]):
-    raise RuntimeError(
-        "Response-only masking removed every label. Check INSTRUCTION_PART and "
-        "RESPONSE_PART against the tokenizer chat template."
-    )
+sample = train_dataset[0]
+print("Rendered DPO prompt:")
+print(sample["prompt"][:2000])
+print("Chosen completion:")
+print(sample["chosen"][:2000])
+print("Rejected completion:")
+print(sample["rejected"][:2000])
 
 gpu = torch.cuda.get_device_properties(0)
 start_reserved = torch.cuda.max_memory_reserved() / 1024**3
@@ -565,36 +529,27 @@ print(
     f"GPU: {gpu.name}; VRAM={gpu.total_memory / 1024**3:.2f} GiB; "
     f"initial_reserved={start_reserved:.2f} GiB"
 )
-print("Rendered training sample:")
-print(train_dataset[0]["text"][:2000])
-print(tokenizer.decode(trainer.train_dataset[0]["input_ids"])[:2000])
-print(tokenizer.decode(
-        [tokenizer.pad_token_id if x == -100 else x 
-        for x in trainer.train_dataset[0]["labels"]]
-    ).replace(tokenizer.pad_token, " ")[:2000]
-)
 
 # %%
-trainer_stats = trainer.train(
+trainer_stats = dpo_trainer.train(
     resume_from_checkpoint=resolve_resume_from_checkpoint()
 )
 
 # %%
-trainer.save_state()
+dpo_trainer.save_state()
 model.save_pretrained(str(ADAPTER_OUTPUT_DIR))
 tokenizer.save_pretrained(str(ADAPTER_OUTPUT_DIR))
 
 # %%
-if MODEL_PATH and BASE_MODEL_ID:
-    subprocess.run(f'sed -i "s|{MODEL_PATH}|{BASE_MODEL_ID}|g" {ADAPTER_OUTPUT_DIR}/README.md', shell=True)
-    subprocess.run(f'sed -i "s|{MODEL_PATH}|{BASE_MODEL_ID}|g" {ADAPTER_OUTPUT_DIR}/adapter_config.json', shell=True)
+subprocess.run(f'sed -i "s|{BASE_MODEL_PATH}|{BASE_MODEL_ID}|g" {ADAPTER_OUTPUT_DIR}/README.md', shell=True)
+subprocess.run(f'sed -i "s|{BASE_MODEL_PATH}|{BASE_MODEL_ID}|g" {ADAPTER_OUTPUT_DIR}/adapter_config.json', shell=True)
 
 # %%
 peak_reserved = torch.cuda.max_memory_reserved() / 1024**3
 runtime = trainer_stats.metrics.get("train_runtime", 0.0)
 print(f"Training runtime: {runtime:.2f} seconds ({runtime / 60:.2f} minutes)")
 print(f"Peak reserved VRAM: {peak_reserved:.2f} GiB")
-print(f"Saved LoRA adapter to {ADAPTER_OUTPUT_DIR}")
+print(f"Saved DPO-trained LoRA adapter to {ADAPTER_OUTPUT_DIR}")
 
 # %%
 if PUSH_TO_HUB:
@@ -631,31 +586,34 @@ if PUSH_TO_HUB:
                 repo_type="model"
             )
         except Exception as exc:
-            print(f"Upload to HF failed: {e}, {exc}")
+            print(f"Upload to Hugging Face failed: {e}, {exc}")
         else:
-            print(f"Upload to HF succeeded")
+            print(f"Upload to Hugging Face succeeded")
     else:
-        print(f"Upload to HF succeeded")
+        print(f"Upload to Hugging Face succeeded")
 
 # %%
 if PUSH_TO_KAGGLE:
     try:
+        if not KAGGLE_USERNAME or not KAGGLE_KEY:
+            raise RuntimeError(
+                "PUSH_TO_KAGGLE=1 but KAGGLE credentials are not configured"
+            )
         import kagglehub
-        
-        # This creates the model repository or pushes a new version if it already exists
+
         kagglehub.model_upload(
             handle=KAGGLE_ADAPTER_REPO,
-            local_model_dir=ADAPTER_OUTPUT_DIR,
-            version_notes=f"LoRA {LORA_STAGE} for unsloth/Nemotron-3-Nano-30B-A3B",
+            local_model_dir=str(ADAPTER_OUTPUT_DIR),
+            version_notes=f"Nemotron LoRA continued from sft to {DPO_STAGE}",
             license_name="Apache 2.0",
         )
 
         kagglehub.dataset_upload(
             handle=KAGGLE_DATASET_REPO,
             local_dataset_dir=WORKING_DIR,
-            version_notes=f"nemotron {LORA_STAGE}",
+            version_notes=f"nemotron {DPO_STAGE}",
         )
-    except Exception as e:
-        print(f"Upload to Kaggle failed: {e}")
+    except Exception as error:
+        print(f"Upload to Kaggle failed: {error}")
     else:
-        print(f"Upload to Kaggle succeeded")
+        print("Upload to Kaggle succeeded")

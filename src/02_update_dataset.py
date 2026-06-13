@@ -42,7 +42,7 @@ wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
 #     "triton>=3.3.0" \
 #     "torchvision==0.25.0+cu128" \
 #     bitsandbytes \
-#     "transformers>=4.56.2" \
+#     "transformers>=4.56.2,<5.0.0" \
 #     "tokenizers>=0.22.0,<=0.23.0" \
 #     "trl>=0.22.2" \
 #     unsloth \
@@ -57,12 +57,14 @@ wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
 #     "torchao>=0.16.0" \
 #     --no-index --find-links={wheels_dir}
 # !uv pip install vllm --no-index --find-links={wheels_dir}
+# !uv pip install "protobuf<6.0.0" --no-index --find-links={wheels_dir}
 
 # %%
 WORKING_DIR = Path(os.environ.get("WORKING_DIR", "/kaggle/working"))
 MODEL_PATH = os.environ.get(
     "MODEL_PATH",
-    "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/default/1",
+    "/kaggle/input/models/metric/nemotron-3-nano-30b-a3b-bf16/transformers/default/1",
+    # "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/default/1",
 )
 LORA_PATH = os.environ.get(
     "LORA_PATH",
@@ -95,6 +97,10 @@ KAGGLE_OUTPUT_DIR = Path(
         str(WORKING_DIR / f"{DATASET_TAG}-kaggle"),
     )
 )
+KAGGLE_DATASET_REPO = os.environ.get(
+    "KAGGLE_DATASET_REPO",
+    f"{KAGGLE_USERNAME}/nemotron-update-dataset",
+)
 HF_UPLOAD_USERNAME = os.environ.get(
     "HF_UPLOAD_USERNAME",
     "the-submitter",
@@ -104,6 +110,23 @@ TRAJECTORIES = max(1, int(os.environ.get("TRAJECTORIES", "4")))
 PROMPT_BATCH_SIZE = max(1, int(os.environ.get("PROMPT_BATCH_SIZE", "100")))
 EXISTING_RESPONSE_RATIO = float(os.environ.get("EXISTING_RESPONSE_RATIO", "0.1"))
 SEED = int(os.environ.get("SEED", "3407"))
+
+
+def optional_nonnegative_int(name: str, default: Optional[int] = None) -> Optional[int]:
+    value = os.environ.get(name, str(default))
+    if value is None or value.strip().lower() in {"", "none", "null"}:
+        return None
+    parsed = int(value)
+    if parsed < 0:
+        raise ValueError(f"{name} must be a non-negative integer or None")
+    return parsed
+
+
+TAKE_BY_SPLIT = {
+    "train": optional_nonnegative_int("TAKE_TRAIN", 2000),
+    "validation": optional_nonnegative_int("TAKE_VALIDATION", 50),
+    "test": optional_nonnegative_int("TAKE_TEST", 0),
+}
 DATASET_WORKERS = max(1, int(os.environ.get("DATASET_NUM_PROC", "8")))
 DATASET_NUM_PROC = DATASET_WORKERS if DATASET_WORKERS > 1 else None
 KEEP_IN_MEMORY = os.environ.get("KEEP_IN_MEMORY", "1").lower() not in {
@@ -428,6 +451,42 @@ def persist_incremental_split(dataset, split_name: str) -> None:
     print(f"{split_name}: persisted incremental snapshot to {target}")
 
 
+def randomly_take_indices(
+    indices: list[int],
+    split_name: str,
+    purpose: str,
+) -> list[int]:
+    take_n = TAKE_BY_SPLIT.get(split_name)
+    if take_n is None or take_n >= len(indices):
+        return sorted(indices)
+    if take_n == 0:
+        print(f"{split_name}: TAKE_{split_name.upper()}=0; skipping candidates")
+        return []
+
+    import random
+
+    random_generator = random.Random(f"{SEED}:{split_name}:{purpose}")
+    selected = random_generator.sample(indices, take_n)
+    return sorted(selected)
+
+
+def randomly_take_candidates(candidates, split_name: str):
+    selected_positions = randomly_take_indices(
+        list(range(len(candidates))),
+        split_name,
+        "resume",
+    )
+    if len(selected_positions) == len(candidates):
+        return candidates
+
+    selected = candidates.select(selected_positions)
+    print(
+        f"{split_name}: randomly took {len(selected):,}/"
+        f"{len(candidates):,} pending candidates"
+    )
+    return selected
+
+
 def select_generation_candidates(dataset, split_name: str):
     already_selected = dataset.filter(
         lambda example: bool(example.get("dpo_selected"))
@@ -437,11 +496,15 @@ def select_generation_candidates(dataset, split_name: str):
         keep_in_memory=KEEP_IN_MEMORY,
     )
     if len(already_selected):
-        print(
-            f"{split_name}: recovered {len(already_selected):,} "
-            "selected unprocessed candidates"
+        selected_pending = randomly_take_candidates(
+            already_selected,
+            split_name,
         )
-        return dataset, already_selected
+        print(
+            f"{split_name}: recovered {len(selected_pending):,}/"
+            f"{len(already_selected):,} selected unprocessed candidates"
+        )
+        return dataset, selected_pending
 
     missing_response_indices = [
         index
@@ -462,7 +525,7 @@ def select_generation_candidates(dataset, split_name: str):
     if extra_count:
         import random
 
-        random_generator = random.Random(SEED)
+        random_generator = random.Random(f"{SEED}:{split_name}:existing")
         sampled_existing_indices = random_generator.sample(
             existing_response_indices,
             extra_count,
@@ -470,25 +533,34 @@ def select_generation_candidates(dataset, split_name: str):
     else:
         sampled_existing_indices = []
 
-    selected_indices = sorted(
+    candidate_pool_indices = sorted(
         missing_response_indices + sampled_existing_indices
     )
-    selected_index_set = set(selected_indices)
-    if selected_indices:
+    selected_indices = randomly_take_indices(
+        candidate_pool_indices,
+        split_name,
+        "new",
+    )
+    candidate_pool_index_set = set(candidate_pool_indices)
+    if candidate_pool_indices:
         dataset = dataset.map(
             lambda example, index: {
-                "dpo_selected": example["dpo_selected"] or index in selected_index_set
+                "dpo_selected": (
+                    example["dpo_selected"]
+                    or index in candidate_pool_index_set
+                )
             },
             with_indices=True,
             num_proc=DATASET_NUM_PROC,
-            desc=f"{split_name}: mark selected candidates",
+            desc=f"{split_name}: mark full candidate pool",
             keep_in_memory=KEEP_IN_MEMORY,
         )
         persist_incremental_split(dataset, split_name)
 
     candidates = dataset.select(selected_indices) if selected_indices else dataset.select([])
     print(
-        f"{split_name}: candidates={len(candidates):,} "
+        f"{split_name}: candidates={len(candidates):,}/"
+        f"{len(candidate_pool_indices):,} "
         f"(missing={len(missing_response_indices):,}, "
         f"existing_sample={len(sampled_existing_indices):,})"
     )
@@ -801,6 +873,12 @@ def save_and_upload(
             kagglehub.dataset_upload(
                 handle=f"{KAGGLE_USERNAME}/{DATASET_TAG}",
                 local_dataset_dir=str(KAGGLE_OUTPUT_DIR),
+            )
+
+            kagglehub.dataset_upload(
+                handle=KAGGLE_DATASET_REPO,
+                local_dataset_dir=WORKING_DIR,
+                version_notes=f"nemotron update dataset",
             )
         except Exception as error:
             print(f"Upload to Kaggle failed: {error}")
