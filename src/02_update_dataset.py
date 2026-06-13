@@ -108,7 +108,6 @@ HF_UPLOAD_USERNAME = os.environ.get(
 
 TRAJECTORIES = max(1, int(os.environ.get("TRAJECTORIES", "4")))
 PROMPT_BATCH_SIZE = max(1, int(os.environ.get("PROMPT_BATCH_SIZE", "100")))
-EXISTING_RESPONSE_RATIO = float(os.environ.get("EXISTING_RESPONSE_RATIO", "0.1"))
 SEED = int(os.environ.get("SEED", "3407"))
 
 
@@ -121,12 +120,140 @@ def optional_nonnegative_int(name: str, default: Optional[int] = None) -> Option
         raise ValueError(f"{name} must be a non-negative integer or None")
     return parsed
 
+def optional_string_list(name: str, default: Optional[str] = None) -> list[str]:
+    value = os.environ.get(name, default)
+    if value is None or not value.strip():
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        parsed = [item.strip() for item in value.split(",")]
+    if isinstance(parsed, str):
+        parsed = [parsed]
+    if not isinstance(parsed, list) or not all(
+        isinstance(item, str) for item in parsed
+    ):
+        raise ValueError(f"{name} must be a JSON list or comma-separated strings")
+    return [item.strip() for item in parsed if item.strip()]
 
-TAKE_BY_SPLIT = {
-    "train": optional_nonnegative_int("TAKE_TRAIN", 2000),
-    "validation": optional_nonnegative_int("TAKE_VALIDATION", 50),
-    "test": optional_nonnegative_int("TAKE_TEST", 0),
+DEFAULT_MISSING_TAKE = {
+    "train": 2_000,
+    "validation": 50,
+    "test": 0,
 }
+CANDIDATE_SELECTION_OPTIONS = {
+    "train": {
+        "missing": {
+            "take": optional_nonnegative_int(
+                "TRAIN_MISSING_TAKE",
+                DEFAULT_MISSING_TAKE["train"],
+            ),
+            "min_idx": optional_nonnegative_int(
+                "TRAIN_MISSING_MIN_IDX"
+            ),
+            "max_idx": optional_nonnegative_int(
+                "TRAIN_MISSING_MAX_IDX"
+            ),
+        },
+        "existing": {
+            "take": optional_nonnegative_int(
+                "TRAIN_EXISTING_TAKE",
+                200,
+            ),
+            "min_idx": optional_nonnegative_int(
+                "TRAIN_EXISTING_MIN_IDX"
+            ),
+            "max_idx": optional_nonnegative_int(
+                "TRAIN_EXISTING_MAX_IDX"
+            ),
+        },
+    },
+    "validation": {
+        "missing": {
+            "take": optional_nonnegative_int(
+                "VALIDATION_MISSING_TAKE",
+                DEFAULT_MISSING_TAKE["validation"],
+            ),
+            "min_idx": optional_nonnegative_int(
+                "VALIDATION_MISSING_MIN_IDX"
+            ),
+            "max_idx": optional_nonnegative_int(
+                "VALIDATION_MISSING_MAX_IDX"
+            ),
+        },
+        "existing": {
+            "take": optional_nonnegative_int(
+                "VALIDATION_EXISTING_TAKE",
+                5,
+            ),
+            "min_idx": optional_nonnegative_int(
+                "VALIDATION_EXISTING_MIN_IDX"
+            ),
+            "max_idx": optional_nonnegative_int(
+                "VALIDATION_EXISTING_MAX_IDX"
+            ),
+        },
+    },
+    "test": {
+        "missing": {
+            "take": optional_nonnegative_int(
+                "TEST_MISSING_TAKE",
+                DEFAULT_MISSING_TAKE["test"],
+            ),
+            "min_idx": optional_nonnegative_int(
+                "TEST_MISSING_MIN_IDX"
+            ),
+            "max_idx": optional_nonnegative_int(
+                "TEST_MISSING_MAX_IDX"
+            ),
+        },
+        "existing": {
+            "take": optional_nonnegative_int(
+                "TEST_EXISTING_TAKE",
+                0,
+            ),
+            "min_idx": optional_nonnegative_int(
+                "TEST_EXISTING_MIN_IDX"
+            ),
+            "max_idx": optional_nonnegative_int(
+                "TEST_EXISTING_MAX_IDX"
+            ),
+        },
+    },
+}
+SOURCE_OPTIONS = {
+    "train": {
+        "include": optional_string_list("TRAIN_INCLUDE_SOURCES"),
+        "order": optional_string_list("TRAIN_ORDER_BY_SOURCES"),
+        "exclude": optional_string_list("TRAIN_EXCLUDE_SOURCES"),
+    },
+    "validation": {
+        "include": optional_string_list("VALIDATION_INCLUDE_SOURCES"),
+        "order": optional_string_list("VALIDATION_ORDER_BY_SOURCES"),
+        "exclude": optional_string_list("VALIDATION_EXCLUDE_SOURCES"),
+    },
+    "test": {
+        "include": optional_string_list("TEST_INCLUDE_SOURCES"),
+        "order": optional_string_list("TEST_ORDER_BY_SOURCES"),
+        "exclude": optional_string_list("TEST_EXCLUDE_SOURCES"),
+    },
+}
+for split_name in SPLIT_NAMES:
+    for candidate_kind in ("missing", "existing"):
+        options = CANDIDATE_SELECTION_OPTIONS[split_name][candidate_kind]
+        range_configured = (
+            options["min_idx"] is not None
+            or options["max_idx"] is not None
+        )
+        take_name = f"{split_name.upper()}_{candidate_kind.upper()}_TAKE"
+        if range_configured and take_name not in os.environ:
+            options["take"] = None
+        elif range_configured and options["take"] is not None:
+            raise ValueError(
+                f"{split_name} {candidate_kind}: configure either {take_name} "
+                f"or {split_name.upper()}_{candidate_kind.upper()}_MIN_IDX/"
+                f"{split_name.upper()}_{candidate_kind.upper()}_MAX_IDX, not both"
+            )
 DATASET_WORKERS = max(1, int(os.environ.get("DATASET_NUM_PROC", "8")))
 DATASET_NUM_PROC = DATASET_WORKERS if DATASET_WORKERS > 1 else None
 KEEP_IN_MEMORY = os.environ.get("KEEP_IN_MEMORY", "1").lower() not in {
@@ -181,9 +308,6 @@ BACKUP_TRAJECTORIES = os.environ.get("BACKUP_TRAJECTORIES", "1").lower() not in 
     "false",
     "no",
 }
-
-if not 0.0 <= EXISTING_RESPONSE_RATIO:
-    raise ValueError("EXISTING_RESPONSE_RATIO must be non-negative")
 
 BOXED_ANSWER_INSTRUCTION = (
     "\nPlease put your final answer inside `\\boxed{}`. "
@@ -454,115 +578,226 @@ def persist_incremental_split(dataset, split_name: str) -> None:
 def randomly_take_indices(
     indices: list[int],
     split_name: str,
+    candidate_kind: str,
     purpose: str,
 ) -> list[int]:
-    take_n = TAKE_BY_SPLIT.get(split_name)
+    take_n = CANDIDATE_SELECTION_OPTIONS[split_name][candidate_kind]["take"]
     if take_n is None or take_n >= len(indices):
-        return sorted(indices)
+        return indices
     if take_n == 0:
-        print(f"{split_name}: TAKE_{split_name.upper()}=0; skipping candidates")
+        print(
+            f"{split_name}: {split_name.upper()}_{candidate_kind.upper()}_"
+            f"TAKE=0; skipping {candidate_kind} candidates"
+        )
         return []
 
     import random
 
-    random_generator = random.Random(f"{SEED}:{split_name}:{purpose}")
-    selected = random_generator.sample(indices, take_n)
-    return sorted(selected)
+    random_generator = random.Random(
+        f"{SEED}:{split_name}:{candidate_kind}:{purpose}"
+    )
+    return random_generator.sample(indices, take_n)
 
 
-def randomly_take_candidates(candidates, split_name: str):
-    selected_positions = randomly_take_indices(
-        list(range(len(candidates))),
+def order_indices_by_source(
+    dataset,
+    indices: list[int],
+    split_name: str,
+) -> list[int]:
+    options = SOURCE_OPTIONS[split_name]
+    include_sources = options["include"]
+    order_sources = options["order"]
+    exclude_sources = set(options["exclude"])
+    if not include_sources and not order_sources and not exclude_sources:
+        return sorted(indices)
+    if "source" not in dataset.column_names:
+        raise KeyError(
+            f"{split_name}: source controls require a 'source' column"
+        )
+
+    indices = [
+        index
+        for index in indices
+        if dataset[index].get("source") not in exclude_sources
+    ]
+    dataset_sources = {
+        source
+        for source in dataset["source"]
+        if source not in exclude_sources
+    }
+    missing_includes = [
+        source for source in include_sources if source not in dataset_sources
+    ]
+    if missing_includes:
+        raise ValueError(
+            f"{split_name}: required INCLUDE_SOURCES are unavailable in the "
+            f"split: {missing_includes}"
+        )
+    available_sources = list(
+        dict.fromkeys(dataset[index].get("source") for index in indices)
+    )
+
+    include_sources = list(dict.fromkeys(include_sources))
+    explicit_order = [
+        source
+        for source in order_sources
+        if source != "*" and source not in include_sources
+    ]
+    remaining_sources = [
+        source
+        for source in available_sources
+        if source not in include_sources and source not in explicit_order
+    ]
+    if "*" in order_sources:
+        wildcard_index = order_sources.index("*")
+        before_wildcard = {
+            source for source in order_sources[:wildcard_index] if source != "*"
+        }
+        ordered_sources = (
+            include_sources
+            + [source for source in explicit_order if source in before_wildcard]
+            + remaining_sources
+            + [source for source in explicit_order if source not in before_wildcard]
+        )
+    else:
+        ordered_sources = include_sources + explicit_order + remaining_sources
+
+    indices_by_source: dict[Any, list[int]] = {}
+    for index in indices:
+        indices_by_source.setdefault(
+            dataset[index].get("source"),
+            [],
+        ).append(index)
+    ordered_indices = [
+        index
+        for source in ordered_sources
+        for index in indices_by_source.get(source, [])
+    ]
+    print(f"{split_name}: candidate source order={ordered_sources}")
+    return ordered_indices
+
+
+def finalize_candidate_indices(
+    indices: list[int],
+    split_name: str,
+    candidate_kind: str,
+    purpose: str,
+) -> list[int]:
+    options = CANDIDATE_SELECTION_OPTIONS[split_name][candidate_kind]
+    min_idx = options["min_idx"]
+    max_idx = options["max_idx"]
+    if min_idx is not None or max_idx is not None:
+        start = 0 if min_idx is None else min_idx
+        stop = len(indices) if max_idx is None else min(max_idx, len(indices))
+        if start > stop:
+            raise ValueError(
+                f"{split_name}: min index {start} exceeds max index {stop}"
+            )
+        selected = indices[start:stop]
+        print(
+            f"{split_name}: selected {candidate_kind} range "
+            f"[{start:,}, {stop:,}) ({len(selected):,} rows)"
+        )
+        return selected
+    return randomly_take_indices(
+        indices,
         split_name,
-        "resume",
+        candidate_kind,
+        purpose,
     )
-    if len(selected_positions) == len(candidates):
-        return candidates
-
-    selected = candidates.select(selected_positions)
-    print(
-        f"{split_name}: randomly took {len(selected):,}/"
-        f"{len(candidates):,} pending candidates"
-    )
-    return selected
 
 
 def select_generation_candidates(dataset, split_name: str):
-    already_selected = dataset.filter(
-        lambda example: bool(example.get("dpo_selected"))
-        and not bool(example.get("dpo_processed")),
-        num_proc=DATASET_NUM_PROC,
-        desc=f"{split_name}: recover selected candidates",
-        keep_in_memory=KEEP_IN_MEMORY,
-    )
-    if len(already_selected):
-        selected_pending = randomly_take_candidates(
-            already_selected,
+    pending_selected_indices = [
+        index
+        for index, example in enumerate(dataset)
+        if bool(example.get("dpo_selected"))
+        and not bool(example.get("dpo_processed"))
+    ]
+    if pending_selected_indices:
+        ordered_pending_indices = order_indices_by_source(
+            dataset,
+            pending_selected_indices,
             split_name,
+        )
+        selected_pending = dataset.select(
+            ordered_pending_indices,
+            keep_in_memory=KEEP_IN_MEMORY,
         )
         print(
             f"{split_name}: recovered {len(selected_pending):,}/"
-            f"{len(already_selected):,} selected unprocessed candidates"
+            f"{len(pending_selected_indices):,} selected unprocessed candidates"
         )
         return dataset, selected_pending
 
-    missing_response_indices = [
+    unprocessed_indices = [
         index
         for index, example in enumerate(dataset)
-        if not example["dpo_processed"]
-        and clean_text(example.get("response")) is None
+        if not example.get("dpo_processed")
     ]
-    existing_response_indices = [
-        index
-        for index, example in enumerate(dataset)
-        if not example["dpo_processed"]
-        and clean_text(example.get("response")) is not None
-    ]
-    extra_count = min(
-        len(existing_response_indices),
-        round(len(missing_response_indices) * EXISTING_RESPONSE_RATIO),
-    )
-    if extra_count:
-        import random
-
-        random_generator = random.Random(f"{SEED}:{split_name}:existing")
-        sampled_existing_indices = random_generator.sample(
-            existing_response_indices,
-            extra_count,
-        )
-    else:
-        sampled_existing_indices = []
-
-    candidate_pool_indices = sorted(
-        missing_response_indices + sampled_existing_indices
-    )
-    selected_indices = randomly_take_indices(
-        candidate_pool_indices,
+    ordered_unprocessed_indices = order_indices_by_source(
+        dataset,
+        unprocessed_indices,
         split_name,
+    )
+    all_missing_response_indices = [
+        index
+        for index in ordered_unprocessed_indices
+        if clean_text(dataset[index].get("response")) is None
+    ]
+    all_existing_response_indices = [
+        index
+        for index in ordered_unprocessed_indices
+        if clean_text(dataset[index].get("response")) is not None
+    ]
+    finalized_missing_indices = finalize_candidate_indices(
+        all_missing_response_indices,
+        split_name,
+        "missing",
         "new",
     )
-    candidate_pool_index_set = set(candidate_pool_indices)
-    if candidate_pool_indices:
+    finalized_existing_indices = finalize_candidate_indices(
+        all_existing_response_indices,
+        split_name,
+        "existing",
+        "new",
+    )
+    merged_finalized_indices = order_indices_by_source(
+        dataset,
+        finalized_missing_indices + finalized_existing_indices,
+        split_name,
+    )
+    finalized_candidate_index_set = set(merged_finalized_indices)
+    if merged_finalized_indices:
         dataset = dataset.map(
             lambda example, index: {
                 "dpo_selected": (
-                    example["dpo_selected"]
-                    or index in candidate_pool_index_set
+                    example.get("dpo_selected")
+                    or index in finalized_candidate_index_set
                 )
             },
             with_indices=True,
             num_proc=DATASET_NUM_PROC,
-            desc=f"{split_name}: mark full candidate pool",
+            desc=f"{split_name}: mark finalized candidates",
             keep_in_memory=KEEP_IN_MEMORY,
         )
         persist_incremental_split(dataset, split_name)
 
-    candidates = dataset.select(selected_indices) if selected_indices else dataset.select([])
+    candidates = (
+        dataset.select(
+            merged_finalized_indices,
+            keep_in_memory=KEEP_IN_MEMORY,
+        )
+        if merged_finalized_indices
+        else dataset.select([], keep_in_memory=KEEP_IN_MEMORY)
+    )
     print(
         f"{split_name}: candidates={len(candidates):,}/"
-        f"{len(candidate_pool_indices):,} "
-        f"(missing={len(missing_response_indices):,}, "
-        f"existing_sample={len(sampled_existing_indices):,})"
+        f"{len(ordered_unprocessed_indices):,} "
+        f"(missing={len(finalized_missing_indices):,}/"
+        f"{len(all_missing_response_indices):,}, "
+        f"existing={len(finalized_existing_indices):,}/"
+        f"{len(all_existing_response_indices):,})"
     )
     return dataset, candidates
 
@@ -751,7 +986,8 @@ def process_split(
     )
     for offset in progress:
         batch = candidates.select(
-            range(offset, min(offset + PROMPT_BATCH_SIZE, len(candidates)))
+            range(offset, min(offset + PROMPT_BATCH_SIZE, len(candidates))),
+            keep_in_memory=KEEP_IN_MEMORY,
         )
         prompts = [str(prompt) for prompt in batch["prompt"]]
         formatted_prompts = format_generation_prompts(tokenizer, prompts)

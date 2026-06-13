@@ -1,8 +1,9 @@
 # %%
 from __future__ import annotations
 
+import json
 import os
-import subprocess
+import shutil
 from pathlib import Path
 from typing import Any, Optional
 
@@ -84,10 +85,39 @@ def optional_nonnegative_int(name: str, default: Optional[int] = None) -> Option
         raise ValueError(f"{name} must be a non-negative integer or None")
     return parsed
 
+def optional_string_list(name: str, default: Optional[str] = None) -> list[str]:
+    value = os.environ.get(name, default)
+    if value is None or not value.strip():
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        parsed = [item.strip() for item in value.split(",")]
+    if isinstance(parsed, str):
+        parsed = [parsed]
+    if not isinstance(parsed, list) or not all(
+        isinstance(item, str) for item in parsed
+    ):
+        raise ValueError(f"{name} must be a JSON list or comma-separated strings")
+    return [item.strip() for item in parsed if item.strip()]
+
+
 TRAIN_MIN_IDX = optional_nonnegative_int("TRAIN_MIN_IDX", 0)
 TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX", 7830)
 EVAL_MIN_IDX = optional_nonnegative_int("EVAL_MIN_IDX", 15)
 EVAL_MAX_IDX = optional_nonnegative_int("EVAL_MAX_IDX", 35)
+SOURCE_OPTIONS = {
+    TRAIN_SPLIT: {
+        "include": optional_string_list("TRAIN_INCLUDE_SOURCES"),
+        "order": optional_string_list("TRAIN_ORDER_BY_SOURCES"),
+        "exclude": optional_string_list("TRAIN_EXCLUDE_SOURCES"),
+    },
+    EVAL_SPLIT: {
+        "include": optional_string_list("EVAL_INCLUDE_SOURCES"),
+        "order": optional_string_list("EVAL_ORDER_BY_SOURCES"),
+        "exclude": optional_string_list("EVAL_EXCLUDE_SOURCES"),
+    },
+}
 
 LORA_STAGE = os.environ.get("LORA_STAGE", "sft")
 LORA_VERSION = os.environ.get("LORA_VERSION", "v1")
@@ -131,7 +161,7 @@ MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))
 LEARNING_RATE = float(os.environ.get("LEARNING_RATE", "2e-4"))
 WARMUP_STEPS = int(os.environ.get("WARMUP_STEPS", "10"))
 LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "10"))
-SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "50"))
+SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "9"))
 EVAL_STEPS = int(os.environ.get("EVAL_STEPS", str(SAVE_STEPS)))
 SAVE_TOTAL_LIMIT = int(os.environ.get("SAVE_TOTAL_LIMIT", "2"))
 
@@ -298,6 +328,80 @@ def load_reasoning_dataset():
     return loaded
 
 
+def apply_source_options(dataset, split_name: str):
+    options = SOURCE_OPTIONS.get(
+        split_name,
+        {"include": [], "order": [], "exclude": []},
+    )
+    include_sources = options["include"]
+    order_sources = options["order"]
+    exclude_sources = set(options["exclude"])
+    if not include_sources and not order_sources and not exclude_sources:
+        return dataset
+    if "source" not in dataset.column_names:
+        raise KeyError(
+            f"{split_name}: source controls require a 'source' column"
+        )
+
+    if exclude_sources:
+        dataset = dataset.filter(
+            lambda example: example.get("source") not in exclude_sources,
+            num_proc=DATASET_NUM_PROC,
+            desc=f"{split_name}: exclude sources",
+            keep_in_memory=KEEP_IN_MEMORY,
+        )
+
+    available_sources = list(dict.fromkeys(dataset["source"]))
+    missing_includes = [
+        source for source in include_sources if source not in available_sources
+    ]
+    if missing_includes:
+        raise ValueError(
+            f"{split_name}: required INCLUDE_SOURCES are unavailable: "
+            f"{missing_includes}"
+        )
+
+    include_sources = list(dict.fromkeys(include_sources))
+    explicit_order = [
+        source
+        for source in order_sources
+        if source != "*" and source not in include_sources
+    ]
+    remaining_sources = [
+        source
+        for source in available_sources
+        if source not in include_sources and source not in explicit_order
+    ]
+    if "*" in order_sources:
+        wildcard_index = order_sources.index("*")
+        before_wildcard = {
+            source for source in order_sources[:wildcard_index] if source != "*"
+        }
+        ordered_sources = (
+            include_sources
+            + [source for source in explicit_order if source in before_wildcard]
+            + remaining_sources
+            + [source for source in explicit_order if source not in before_wildcard]
+        )
+    else:
+        ordered_sources = include_sources + explicit_order + remaining_sources
+
+    indices_by_source: dict[Any, list[int]] = {}
+    for index, source in enumerate(dataset["source"]):
+        indices_by_source.setdefault(source, []).append(index)
+    selected_indices = [
+        index
+        for source in ordered_sources
+        for index in indices_by_source.get(source, [])
+    ]
+    ordered = dataset.select(selected_indices, keep_in_memory=KEEP_IN_MEMORY)
+    print(
+        f"{split_name}: source order={ordered_sources}; "
+        f"retained={len(ordered):,}"
+    )
+    return ordered
+
+
 def prepare_split(dataset, tokenizer, split_name: str, already_filtered: bool = False):
     original_size = len(dataset)
     if not already_filtered:
@@ -354,7 +458,7 @@ def select_index_range(
             f"{split_name}: min index {start} is outside dataset size {len(dataset)}"
         )
 
-    selected = dataset.select(range(start, stop))
+    selected = dataset.select(range(start, stop), keep_in_memory=KEEP_IN_MEMORY)
     if not len(selected):
         raise ValueError(
             f"{split_name}: index range [{start}, {stop}) selected no examples"
@@ -368,8 +472,12 @@ def select_index_range(
 
 def prepare_datasets(tokenizer):
     dataset_dict = load_reasoning_dataset()
-    train_dataset = prepare_split(
+    train_source_dataset = apply_source_options(
         dataset_dict[TRAIN_SPLIT],
+        TRAIN_SPLIT,
+    )
+    train_dataset = prepare_split(
+        train_source_dataset,
         tokenizer,
         TRAIN_SPLIT,
     )
@@ -382,7 +490,11 @@ def prepare_datasets(tokenizer):
 
     eval_dataset = None
     if EVAL_SPLIT in dataset_dict and len(dataset_dict[EVAL_SPLIT]):
-        filtered_eval = dataset_dict[EVAL_SPLIT].filter(
+        eval_source_dataset = apply_source_options(
+            dataset_dict[EVAL_SPLIT],
+            EVAL_SPLIT,
+        )
+        filtered_eval = eval_source_dataset.filter(
             is_trainable_example,
             num_proc=DATASET_NUM_PROC,
             desc=f"{EVAL_SPLIT}: check non-empty responses",
@@ -405,10 +517,45 @@ def prepare_datasets(tokenizer):
 
 
 # %%
+def prepare_adapter_input_path() -> Optional[str]:
+    if ADAPTER_INPUT_PATH is None:
+        return None
+
+    source_path = Path(ADAPTER_INPUT_PATH)
+    if not (source_path / "adapter_config.json").exists():
+        raise FileNotFoundError(
+            f"adapter_config.json does not exist under {source_path}"
+        )
+
+    adapter_path = source_path
+    if str(source_path).startswith("/kaggle/input"):
+        adapter_path = WORKING_DIR / "adapter_input"
+        if adapter_path.exists():
+            shutil.rmtree(adapter_path)
+        shutil.copytree(source_path, adapter_path)
+
+    if BASE_MODEL_ID and MODEL_PATH:
+        readme_path = adapter_path / "README.md"
+        if readme_path.exists():
+            readme_path.write_text(
+                readme_path.read_text().replace(BASE_MODEL_ID, MODEL_PATH)
+            )
+
+        config_path = adapter_path / "adapter_config.json"
+        if config_path.exists():
+            config_path.write_text(
+                config_path.read_text().replace(BASE_MODEL_ID, MODEL_PATH)
+            )
+
+    return str(adapter_path)
+
+
 def load_model_and_tokenizer():
     from unsloth import FastLanguageModel
 
-    model_source = ADAPTER_INPUT_PATH or MODEL_PATH
+    adapter_input_path = prepare_adapter_input_path()
+    model_source = adapter_input_path or MODEL_PATH
+
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=model_source,
         max_seq_length=MAX_SEQ_LENGTH,
@@ -428,7 +575,7 @@ def load_model_and_tokenizer():
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
-    if ADAPTER_INPUT_PATH is None:
+    if adapter_input_path is None:
         model = FastLanguageModel.get_peft_model(
             model,
             r=LORA_R,
@@ -454,6 +601,18 @@ def load_model_and_tokenizer():
             use_rslora=False,
             loftq_config=None,
         )
+    else:
+        trainable_parameters = sum(
+            parameter.numel()
+            for parameter in model.parameters()
+            if parameter.requires_grad
+        )
+        if trainable_parameters == 0:
+            raise RuntimeError(
+                "The SFT adapter loaded without trainable parameters; "
+                "DPO would not update the existing LoRA"
+            )
+        print(f"Trainable adapter parameters: {trainable_parameters:,}")
     return model, tokenizer
 
 
@@ -525,7 +684,7 @@ trainer = SFTTrainer(
         greater_is_better=False if has_eval else None,
         optim="adamw_8bit",
         adam_beta1=0.9,
-        adam_beta2=0.95,
+        adam_beta2=0.999,
         adam_epsilon=1e-8,
         weight_decay=0.0,
         lr_scheduler_type="cosine",
@@ -586,8 +745,16 @@ tokenizer.save_pretrained(str(ADAPTER_OUTPUT_DIR))
 
 # %%
 if MODEL_PATH and BASE_MODEL_ID:
-    subprocess.run(f'sed -i "s|{MODEL_PATH}|{BASE_MODEL_ID}|g" {ADAPTER_OUTPUT_DIR}/README.md', shell=True)
-    subprocess.run(f'sed -i "s|{MODEL_PATH}|{BASE_MODEL_ID}|g" {ADAPTER_OUTPUT_DIR}/adapter_config.json', shell=True)
+    readme_path = ADAPTER_OUTPUT_DIR / "README.md"
+    if readme_path.exists():
+        readme_path.write_text(
+            readme_path.read_text().replace(MODEL_PATH, BASE_MODEL_ID)
+        )
+    config_path = ADAPTER_OUTPUT_DIR / "adapter_config.json"
+    if config_path.exists():
+        config_path.write_text(
+            config_path.read_text().replace(MODEL_PATH, BASE_MODEL_ID)
+        )
 
 # %%
 peak_reserved = torch.cuda.max_memory_reserved() / 1024**3

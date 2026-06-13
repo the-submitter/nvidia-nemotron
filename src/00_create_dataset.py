@@ -1,7 +1,6 @@
 # %%
 from __future__ import annotations
 
-import json
 import heapq
 import os
 import re
@@ -63,6 +62,12 @@ LOCAL_COMPETITION_PATH = Path(
         "/kaggle/input/competitions/nvidia-nemotron-model-reasoning-challenge",
     )
 )
+LOCAL_NEMOTRON_COT_TONG_PATH = Path(
+    os.environ.get(
+        "LOCAL_NEMOTRON_COT_TONG_PATH",
+        "/kaggle/input/datasets/dgxchen/nemotron-cot-tong",
+    )
+)
 HF_UPLOAD_USERNAME = os.environ.get("HF_UPLOAD_USERNAME", "the-submitter")
 DATASET_TAG = os.environ.get("DATASET_TAG", "nemotron-reasoning")
 LOCAL_OUTPUT_DIR = WORKING_DIR / DATASET_TAG
@@ -120,6 +125,7 @@ class DatasetConfig:
     filter_map_include: bool = True
     stream_filter: Optional[ExamplePredicate] = None
     shuffle_seed: int = 42
+    local_files: tuple[str, ...] = ()
     load_kwargs: Mapping[str, Any] = field(default_factory=dict)
 
     @property
@@ -154,28 +160,57 @@ def extract_boxed_spans(text: Any) -> list[tuple[int, int, str]]:
         return []
 
     value = str(text)
-    boxed_starts = list(BOXED_START_RE.finditer(value))
     spans: list[tuple[int, int, str]] = []
-    for index, match in enumerate(boxed_starts):
-        content_start = match.end()
-        segment_end = (
-            boxed_starts[index + 1].start()
-            if index + 1 < len(boxed_starts)
-            else len(value)
-        )
-        segment = value[content_start:segment_end]
-        last_brace = segment.rfind("}")
-        if last_brace == -1:
-            spans.append((match.start(), segment_end, segment))
+    cursor = 0
+    marker = r"\boxed{"
+    while True:
+        start = value.find(marker, cursor)
+        if start < 0:
+            break
+        content_start = start + len(marker)
+        depth = 1
+        index = content_start
+        while index < len(value) and depth:
+            if value[index] == "{":
+                depth += 1
+            elif value[index] == "}":
+                depth -= 1
+            index += 1
+        if depth == 0:
+            spans.append((start, index, value[content_start : index - 1]))
+            cursor = index
         else:
-            spans.append(
-                (
-                    match.start(),
-                    content_start + last_brace + 1,
-                    segment[:last_brace],
-                )
-            )
+            cursor = content_start
     return spans
+
+
+# def extract_boxed_spans(text: Any) -> list[tuple[int, int, str]]:
+#     if not text:
+#         return []
+
+#     value = str(text)
+#     boxed_starts = list(BOXED_START_RE.finditer(value))
+#     spans: list[tuple[int, int, str]] = []
+#     for index, match in enumerate(boxed_starts):
+#         content_start = match.end()
+#         segment_end = (
+#             boxed_starts[index + 1].start()
+#             if index + 1 < len(boxed_starts)
+#             else len(value)
+#         )
+#         segment = value[content_start:segment_end]
+#         last_brace = segment.rfind("}")
+#         if last_brace == -1:
+#             spans.append((match.start(), segment_end, segment))
+#         else:
+#             spans.append(
+#                 (
+#                     match.start(),
+#                     content_start + last_brace + 1,
+#                     segment[:last_brace],
+#                 )
+#             )
+#     return spans
 
 
 def strip_boxed(value: Any) -> Optional[str]:
@@ -310,13 +345,18 @@ def normalized_record(
     answer_type: Optional[str] = None,
     difficulty: Any = None,
     multiple_choice: bool = False,
+    reconcile_answer: bool = True,
 ) -> Optional[dict[str, Any]]:
     normalized_prompt = clean_text(prompt)
     if normalized_prompt is None:
         return None
 
     normalized_response = clean_text(response)
-    normalized_answer = reconcile_final_answer(normalized_response, final_answer)
+    normalized_answer = (
+        reconcile_final_answer(normalized_response, final_answer)
+        if reconcile_answer
+        else strip_boxed(final_answer)
+    )
     return {
         "id": clean_text(record_id),
         "source": source,
@@ -607,6 +647,26 @@ def process_open_math_reasoning(example: dict[str, Any]) -> Optional[dict[str, A
     )
 
 
+def process_nemotron_cot_tong(
+    example: dict[str, Any],
+) -> Optional[dict[str, Any]]:
+    generated_cot = clean_text(example.get("generated_cot"))
+    if generated_cot is not None and "</think>" in generated_cot:
+        if not generated_cot.lstrip().startswith("<think>"):
+            generated_cot = f"<think>\n{generated_cot}"
+    reasoning, response = split_think_content(generated_cot)
+    return normalized_record(
+        source="dgxchen/nemotron-cot-tong",
+        record_id=example.get("id"),
+        domain=example.get("type"),
+        prompt=example.get("prompt"),
+        reasoning=reasoning,
+        response=response,
+        final_answer=example.get("answer"),
+        reconcile_answer=False,
+    )
+
+
 def valid_open_math_reasoning(example: dict[str, Any]) -> bool:
     return (
         clean_text(example.get("problem")) is not None
@@ -723,9 +783,16 @@ DATA_CONFIGS = [
         ),
     ),
     DatasetConfig(
+        name=str(LOCAL_NEMOTRON_COT_TONG_PATH),
+        source="local",
+        quotas={"train": 7_830, "validation": 0, "test": 0},
+        processor=process_nemotron_cot_tong,
+        local_files=("problem_ids_matched.csv",),
+    ),
+    DatasetConfig(
         name=str(LOCAL_COMPETITION_PATH),
         source="local",
-        quotas={"train": 9_310, "validation": 95, "test": 95},
+        quotas={"train": 9_500, "validation": 0, "test": 0},
         processor=process_competition_data,
     ),
 ]
@@ -751,7 +818,11 @@ def resolve_split(
     return concatenate_datasets([dataset[name] for name in dataset])
 
 
-def load_local_dataset(path: Path, split: Optional[str]) -> Dataset:
+def load_local_dataset(
+    path: Path,
+    split: Optional[str],
+    local_files: tuple[str, ...] = (),
+) -> Dataset:
     if not path.exists():
         raise FileNotFoundError(f"Local dataset path does not exist: {path}")
 
@@ -767,11 +838,19 @@ def load_local_dataset(path: Path, split: Optional[str]) -> Dataset:
         ".jsonl": "json",
         ".parquet": "parquet",
     }
-    files = [
-        file
-        for file in path.rglob("*")
-        if file.is_file() and file.suffix.lower() in extensions
-    ]
+    if local_files:
+        files = [path / file_name for file_name in local_files]
+        missing_files = [file for file in files if not file.is_file()]
+        if missing_files:
+            raise FileNotFoundError(
+                f"Missing configured local dataset files: {missing_files}"
+            )
+    else:
+        files = [
+            file
+            for file in path.rglob("*")
+            if file.is_file() and file.suffix.lower() in extensions
+        ]
     if not files:
         raise FileNotFoundError(f"No supported dataset files found under {path}")
 
@@ -886,7 +965,11 @@ def materialize_streaming_dataset(
 
 def load_source_dataset(config: DatasetConfig) -> Dataset:
     if config.source == "local":
-        return load_local_dataset(Path(config.name), config.split)
+        return load_local_dataset(
+            Path(config.name),
+            config.split,
+            config.local_files,
+        )
 
     load_kwargs = dict(config.load_kwargs)
     streaming = bool(load_kwargs.get("streaming"))
@@ -983,7 +1066,7 @@ def allocate_fixed_splits(dataset: Dataset, config: DatasetConfig) -> DatasetDic
             f"but only {len(dataset):,} are available"
         )
 
-    selected = dataset.select(range(config.total_size))
+    selected = dataset.select(range(config.total_size), keep_in_memory=KEEP_IN_MEMORY)
     selected = selected.shuffle(seed=config.shuffle_seed, keep_in_memory=KEEP_IN_MEMORY)
 
     output = {}
@@ -991,9 +1074,9 @@ def allocate_fixed_splits(dataset: Dataset, config: DatasetConfig) -> DatasetDic
     for split in SPLIT_NAMES:
         size = config.quotas.get(split, 0)
         split_dataset = (
-            selected.select(range(offset, offset + size))
+            selected.select(range(offset, offset + size), keep_in_memory=KEEP_IN_MEMORY)
             if size
-            else selected.select([])
+            else selected.select([], keep_in_memory=KEEP_IN_MEMORY)
         )
         if size:
             split_dataset = split_dataset.map(
@@ -1030,7 +1113,45 @@ def build_final_dataset(configs: list[DatasetConfig]) -> DatasetDict:
     final_splits = {}
     for split in SPLIT_NAMES:
         parts = [dataset[split] for dataset in prepared if len(dataset[split])]
-        final_splits[split] = concatenate_datasets(parts).shuffle(
+        if not parts:
+            final_splits[split] = Dataset.from_dict(
+                {column: [] for column in SCHEMA_COLUMNS},
+                features=SCHEMA_FEATURES,
+            )
+            continue
+        combined = concatenate_datasets(parts)
+        selected_by_prompt: dict[str, tuple[int, int]] = {}
+        dedupe_combined = tqdm(
+            enumerate(combined), 
+            desc=f"Final dataset (split=`{split}`): dedupe by `prompt`",
+        )
+        for index, example in dedupe_combined:
+            prompt = example["prompt"]
+            response = clean_text(example.get("response"))
+            if prompt in selected_by_prompt:
+                current_index, current_score = selected_by_prompt[prompt]
+                if response is None:
+                    continue
+                score = len(response) + len(clean_text(example.get("reasoning")) or "")
+                if current_score >= 0 and current_score <= score:
+                    continue
+                selected_by_prompt[prompt] = (index, score)
+            else:
+                score = (
+                    len(response) + len(clean_text(example.get("reasoning")) or "")
+                    if response is not None
+                    else -1
+                )
+                selected_by_prompt[prompt] = (index, score)
+
+        selected_indices = sorted(
+            index
+            for index, _score in selected_by_prompt.values()
+        )
+        deduplicated = combined.select(selected_indices, keep_in_memory=KEEP_IN_MEMORY)
+        removed = len(combined) - len(deduplicated)
+        print(f"{split}: removed {removed:,} duplicate prompts")
+        final_splits[split] = deduplicated.shuffle(
             seed=configs[0].shuffle_seed,
             keep_in_memory=KEEP_IN_MEMORY,
         )
@@ -1046,8 +1167,11 @@ def validate_final_dataset(
         for split in SPLIT_NAMES
     }
     actual_sizes = {split: len(dataset[split]) for split in SPLIT_NAMES}
-    if actual_sizes != expected_sizes:
-        raise AssertionError(f"Split sizes differ: expected={expected_sizes}, actual={actual_sizes}")
+    if any(actual_sizes[split] > expected_sizes[split] for split in SPLIT_NAMES):
+        raise AssertionError(
+            f"Split sizes exceed configured quotas: "
+            f"expected_max={expected_sizes}, actual={actual_sizes}"
+        )
 
     for split in SPLIT_NAMES:
         if tuple(dataset[split].column_names) != SCHEMA_COLUMNS:
@@ -1056,69 +1180,65 @@ def validate_final_dataset(
             )
         if len(set(dataset[split]["id"])) != len(dataset[split]):
             raise AssertionError(f"{split} contains duplicate ids")
+        if len(set(dataset[split]["prompt"])) != len(dataset[split]):
+            raise AssertionError(f"{split} contains duplicate prompts")
 
-    print("Validated split sizes:", actual_sizes)
-
-
-# %%
-def main() -> None:
-    final_dataset = build_final_dataset(DATA_CONFIGS)
-    validate_final_dataset(final_dataset, DATA_CONFIGS)
-    print(final_dataset)
-
-    final_dataset.save_to_disk(
-        str(LOCAL_OUTPUT_DIR),
-        num_proc=NUM_PROC,
-    )
-    print(f"Saved dataset to {LOCAL_OUTPUT_DIR}")
-
-    if UPLOAD_TO_HF:
-        try:
-            if not HF_KEY:
-                raise RuntimeError("UPLOAD_TO_HF=1 but HF_KEY/HF_TOKEN is not configured")
-            final_dataset.push_to_hub(
-                f"{HF_UPLOAD_USERNAME}/{DATASET_TAG}",
-                private=True,
-                token=HF_KEY,
-            )
-        except Exception as e:
-            print(f"Upload to HF failed: {e}")
-        else:
-            print(f"Upload to HF succeeded")
-
-    if UPLOAD_TO_KAGGLE:
-        try:
-            if not KAGGLE_USERNAME or not KAGGLE_KEY:
-                raise RuntimeError(
-                    "UPLOAD_TO_KAGGLE=1 but KAGGLE_USERNAME/KAGGLE_KEY is not configured"
-                )
-
-            import kagglehub
-
-            kaggle_folder = KAGGLE_CACHE_DIR / DATASET_TAG
-            kaggle_folder.mkdir(parents=True, exist_ok=True)
-            for split_name, split_dataset in final_dataset.items():
-                split_dataset.to_parquet(kaggle_folder / f"{split_name}.parquet")
-
-            # metadata = {
-            #     "title": DATASET_TAG.replace("-", " ").title(),
-            #     "id": f"{KAGGLE_USERNAME}/{DATASET_TAG}",
-            #     "licenses": [{"name": "other"}],
-            # }
-            # (kaggle_folder / "dataset-metadata.json").write_text(
-            #     json.dumps(metadata, indent=2),
-            #     encoding="utf-8",
-            # )
-            kagglehub.dataset_upload(
-                handle=f"{KAGGLE_USERNAME}/{DATASET_TAG}",
-                local_dataset_dir=str(kaggle_folder),
-            )
-        except Exception as e:
-            print(f"Upload to Kaggle failed: {e}")
-        else:
-            print(f"Upload to Kaggle succeeded")
+    print("Validated deduplicated split sizes:", actual_sizes)
 
 
 # %%
-if __name__ == "__main__":
-    main()
+final_dataset = build_final_dataset(DATA_CONFIGS)
+
+
+# %%
+validate_final_dataset(final_dataset, DATA_CONFIGS)
+print(final_dataset)
+
+
+# %%
+final_dataset.save_to_disk(
+    str(LOCAL_OUTPUT_DIR),
+    num_proc=NUM_PROC,
+)
+print(f"Saved dataset to {LOCAL_OUTPUT_DIR}")
+
+
+# %%
+if UPLOAD_TO_HF:
+    try:
+        if not HF_KEY:
+            raise RuntimeError("UPLOAD_TO_HF=1 but HF_KEY/HF_TOKEN is not configured")
+        final_dataset.push_to_hub(
+            f"{HF_UPLOAD_USERNAME}/{DATASET_TAG}",
+            private=True,
+            token=HF_KEY,
+        )
+    except Exception as e:
+        print(f"Upload to HF failed: {e}")
+    else:
+        print(f"Upload to HF succeeded")
+
+
+# %%
+if UPLOAD_TO_KAGGLE:
+    try:
+        if not KAGGLE_USERNAME or not KAGGLE_KEY:
+            raise RuntimeError(
+                "UPLOAD_TO_KAGGLE=1 but KAGGLE_USERNAME/KAGGLE_KEY is not configured"
+            )
+
+        import kagglehub
+
+        kaggle_folder = KAGGLE_CACHE_DIR / DATASET_TAG
+        kaggle_folder.mkdir(parents=True, exist_ok=True)
+        for split_name, split_dataset in final_dataset.items():
+            split_dataset.to_parquet(kaggle_folder / f"{split_name}.parquet")
+
+        kagglehub.dataset_upload(
+            handle=f"{KAGGLE_USERNAME}/{DATASET_TAG}",
+            local_dataset_dir=str(kaggle_folder),
+        )
+    except Exception as e:
+        print(f"Upload to Kaggle failed: {e}")
+    else:
+        print(f"Upload to Kaggle succeeded")
