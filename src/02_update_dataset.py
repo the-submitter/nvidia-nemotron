@@ -12,8 +12,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Optional
 
-import math_verify
-
 # %%
 # User secrets
 # try:
@@ -75,7 +73,7 @@ MODEL_PATH = os.environ.get(
 )
 LORA_PATH = os.environ.get(
     "LORA_PATH",
-    "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/lora-sft/1",
+    "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/lora-sft/7",
 )
 DATASET_PATH = os.environ.get(
     "DATASET_PATH",
@@ -106,7 +104,7 @@ KAGGLE_OUTPUT_DIR = Path(
 )
 KAGGLE_DATASET_REPO = os.environ.get(
     "KAGGLE_DATASET_REPO",
-    f"{KAGGLE_USERNAME}/nemotron-update-dataset",
+    f"{KAGGLE_USERNAME}/{DATASET_TAG}",
 )
 HF_UPLOAD_USERNAME = os.environ.get(
     "HF_UPLOAD_USERNAME",
@@ -143,94 +141,125 @@ def optional_string_list(name: str, default: Optional[str] = None) -> list[str]:
         raise ValueError(f"{name} must be a JSON list or comma-separated strings")
     return [item.strip() for item in parsed if item.strip()]
 
-DEFAULT_MISSING_TAKE = {
-    "train": 2_000,
-    "validation": 50,
-    "test": 0,
+DEFAULT_TAKE = {
+    "missing": {
+        "train": 1_500,
+        "validation": 50,
+        "test": 0,
+    },
+    "existing": {
+        "train": 85,
+        "validation": 5,
+        "test": 0,
+    },
 }
 CANDIDATE_SELECTION_OPTIONS = {
     "train": {
         "missing": {
             "take": optional_nonnegative_int(
                 "TRAIN_MISSING_TAKE",
-                DEFAULT_MISSING_TAKE["train"],
             ),
             "min_idx": optional_nonnegative_int(
-                "TRAIN_MISSING_MIN_IDX"
+                "TRAIN_MISSING_MIN_IDX",
             ),
             "max_idx": optional_nonnegative_int(
-                "TRAIN_MISSING_MAX_IDX"
+                "TRAIN_MISSING_MAX_IDX",
+                DEFAULT_TAKE["missing"]["train"],
             ),
+            "filter_hq": os.environ.get(
+                "TRAIN_MISSING_FILTER_HQ",
+                "1",
+            ).lower() not in {"0", "false", "no"},
         },
         "existing": {
             "take": optional_nonnegative_int(
                 "TRAIN_EXISTING_TAKE",
-                200,
             ),
             "min_idx": optional_nonnegative_int(
-                "TRAIN_EXISTING_MIN_IDX"
+                "TRAIN_EXISTING_MIN_IDX",
             ),
             "max_idx": optional_nonnegative_int(
-                "TRAIN_EXISTING_MAX_IDX"
+                "TRAIN_EXISTING_MAX_IDX",
+                DEFAULT_TAKE["existing"]["train"],
             ),
+            "filter_hq": os.environ.get(
+                "TRAIN_EXISTING_FILTER_HQ",
+                "1",
+            ).lower() not in {"0", "false", "no"},
         },
     },
     "validation": {
         "missing": {
             "take": optional_nonnegative_int(
                 "VALIDATION_MISSING_TAKE",
-                DEFAULT_MISSING_TAKE["validation"],
             ),
             "min_idx": optional_nonnegative_int(
-                "VALIDATION_MISSING_MIN_IDX"
+                "VALIDATION_MISSING_MIN_IDX",
             ),
             "max_idx": optional_nonnegative_int(
-                "VALIDATION_MISSING_MAX_IDX"
+                "VALIDATION_MISSING_MAX_IDX",
+                DEFAULT_TAKE["missing"]["validation"],
             ),
+            "filter_hq": os.environ.get(
+                "VALIDATION_MISSING_FILTER_HQ",
+                "1",
+            ).lower() not in {"0", "false", "no"},
         },
         "existing": {
             "take": optional_nonnegative_int(
                 "VALIDATION_EXISTING_TAKE",
-                5,
             ),
             "min_idx": optional_nonnegative_int(
-                "VALIDATION_EXISTING_MIN_IDX"
+                "VALIDATION_EXISTING_MIN_IDX",
             ),
             "max_idx": optional_nonnegative_int(
-                "VALIDATION_EXISTING_MAX_IDX"
+                "VALIDATION_EXISTING_MAX_IDX",
+                DEFAULT_TAKE["existing"]["validation"],
             ),
+            "filter_hq": os.environ.get(
+                "VALIDATION_EXISTING_FILTER_HQ",
+                "1",
+            ).lower() not in {"0", "false", "no"},
         },
     },
     "test": {
         "missing": {
             "take": optional_nonnegative_int(
                 "TEST_MISSING_TAKE",
-                DEFAULT_MISSING_TAKE["test"],
             ),
             "min_idx": optional_nonnegative_int(
-                "TEST_MISSING_MIN_IDX"
+                "TEST_MISSING_MIN_IDX",
             ),
             "max_idx": optional_nonnegative_int(
-                "TEST_MISSING_MAX_IDX"
+                "TEST_MISSING_MAX_IDX",
+                DEFAULT_TAKE["missing"]["test"],
             ),
+            "filter_hq": os.environ.get(
+                "TEST_MISSING_FILTER_HQ",
+                "1",
+            ).lower() not in {"0", "false", "no"},
         },
         "existing": {
             "take": optional_nonnegative_int(
                 "TEST_EXISTING_TAKE",
-                0,
             ),
             "min_idx": optional_nonnegative_int(
-                "TEST_EXISTING_MIN_IDX"
+                "TEST_EXISTING_MIN_IDX",
             ),
             "max_idx": optional_nonnegative_int(
-                "TEST_EXISTING_MAX_IDX"
+                "TEST_EXISTING_MAX_IDX",
+                DEFAULT_TAKE["existing"]["test"],
             ),
+            "filter_hq": os.environ.get(
+                "TEST_EXISTING_FILTER_HQ",
+                "1",
+            ).lower() not in {"0", "false", "no"},
         },
     },
 }
 SOURCE_OPTIONS = {
     "train": {
-        "include": optional_string_list("TRAIN_INCLUDE_SOURCES"),
+        "include": optional_string_list("TRAIN_INCLUDE_SOURCES", '["nvidia-nemotron-model-reasoning-challenge", "dgxchen/nemotron-cot-tong"]'),
         "order": optional_string_list("TRAIN_ORDER_BY_SOURCES"),
         "exclude": optional_string_list("TRAIN_EXCLUDE_SOURCES"),
     },
@@ -352,11 +381,29 @@ BACKUP_FIELDS = (
 
 
 # %%
+import math_verify
+
 def clean_text(value: Any) -> Optional[str]:
     if value is None:
         return None
     text = str(value).strip()
     return text or None
+
+HQ_SOURCES = {
+    "nvidia-nemotron-model-reasoning-challenge",
+    "dgxchen/nemotron-cot-tong",
+}
+
+HQ_ANSWER_TYPES = {"integer", "float", "fraction"}
+
+def is_high_quality_example(example: dict[str, Any]) -> bool:
+    if example.get("source") in HQ_SOURCES:
+        return True
+    answer_type = clean_text(example.get("answer_type"))
+    if answer_type is not None and answer_type.lower() in HQ_ANSWER_TYPES:
+        return True
+    final_answer = clean_text(example.get("final_answer"))
+    return final_answer is not None and final_answer.isalnum()
 
 
 def extract_competition_boxed_answer(text: Any) -> Optional[str]:
@@ -802,6 +849,26 @@ def finalize_candidate_indices(
     )
 
 
+def filter_high_quality_indices(
+    dataset,
+    indices: list[int],
+    split_name: str,
+    candidate_kind: str,
+) -> list[int]:
+    if not CANDIDATE_SELECTION_OPTIONS[split_name][candidate_kind]["filter_hq"]:
+        return indices
+    selected = [
+        index
+        for index in indices
+        if is_high_quality_example(dataset[index])
+    ]
+    print(
+        f"{split_name}: {candidate_kind} HQ filter retained "
+        f"{len(selected):,}/{len(indices):,} candidates"
+    )
+    return selected
+
+
 def select_generation_candidates(dataset, split_name: str):
     pending_selected_indices = [
         index
@@ -845,6 +912,18 @@ def select_generation_candidates(dataset, split_name: str):
         for index in ordered_unprocessed_indices
         if clean_text(dataset[index].get("response")) is not None
     ]
+    all_missing_response_indices = filter_high_quality_indices(
+        dataset,
+        all_missing_response_indices,
+        split_name,
+        "missing",
+    )
+    all_existing_response_indices = filter_high_quality_indices(
+        dataset,
+        all_existing_response_indices,
+        split_name,
+        "existing",
+    )
     finalized_missing_indices = finalize_candidate_indices(
         all_missing_response_indices,
         split_name,

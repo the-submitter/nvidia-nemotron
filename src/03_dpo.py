@@ -129,6 +129,12 @@ EVAL_SHUFFLE = os.environ.get("EVAL_SHUFFLE", "1").lower() not in {
     "false",
     "no",
 }
+FILTER_HQ_BY_SPLIT = {
+    TRAIN_SPLIT: os.environ.get("TRAIN_FILTER_HQ", "0").lower()
+        not in {"0", "false", "no"},
+    EVAL_SPLIT: os.environ.get("EVAL_FILTER_HQ", "0").lower()
+        not in {"0", "false", "no"},
+}
 
 DPO_STAGE = os.environ.get("DPO_STAGE", "dpo")
 DPO_VERSION = os.environ.get("DPO_VERSION", "v1")
@@ -240,6 +246,22 @@ def is_preference_example(example: dict[str, Any]) -> bool:
         and clean_text(example.get("chosen")) is not None
         and clean_text(example.get("rejected")) is not None
     )
+
+HQ_SOURCES = {
+    "nvidia-nemotron-model-reasoning-challenge",
+    "dgxchen/nemotron-cot-tong",
+}
+
+HQ_ANSWER_TYPES = {"integer", "float", "fraction"}
+
+def is_high_quality_example(example: dict[str, Any]) -> bool:
+    if example.get("source") in HQ_SOURCES:
+        return True
+    answer_type = clean_text(example.get("answer_type"))
+    if answer_type is not None and answer_type.lower() in HQ_ANSWER_TYPES:
+        return True
+    final_answer = clean_text(example.get("final_answer"))
+    return final_answer is not None and final_answer.isalnum()
 
 
 def build_user_content(prompt: Any) -> str:
@@ -436,6 +458,26 @@ def prepare_split(
             return None
         raise ValueError(
             f"{split_name} has no examples with non-empty chosen and rejected"
+        )
+
+    if FILTER_HQ_BY_SPLIT.get(split_name):
+        before_hq = len(dataset)
+        dataset = dataset.filter(
+            is_high_quality_example,
+            num_proc=DATASET_NUM_PROC,
+            desc=f"{split_name}: keep high-quality examples",
+            keep_in_memory=KEEP_IN_MEMORY,
+        )
+        if not len(dataset):
+            if allow_empty:
+                print(f"{split_name}: no high-quality preference examples")
+                return None
+            raise ValueError(
+                f"{split_name} has no high-quality preference examples"
+            )
+        print(
+            f"{split_name}: HQ filter retained "
+            f"{len(dataset):,}/{before_hq:,} examples"
         )
 
     dataset = dataset.map(

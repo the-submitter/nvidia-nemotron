@@ -74,7 +74,7 @@ DATASET_PATH = os.environ.get(
 )
 DATASET_REVISION = os.environ.get("DATASET_REVISION")
 TRAIN_SPLIT = os.environ.get("TRAIN_SPLIT", "train")
-EVAL_SPLIT = os.environ.get("EVAL_SPLIT", "validation")
+EVAL_SPLIT = os.environ.get("EVAL_SPLIT", None)
 
 def optional_nonnegative_int(name: str, default: Optional[int] = None) -> Optional[int]:
     value = os.environ.get(name, str(default))
@@ -103,12 +103,12 @@ def optional_string_list(name: str, default: Optional[str] = None) -> list[str]:
 
 
 TRAIN_MIN_IDX = optional_nonnegative_int("TRAIN_MIN_IDX", 0)
-TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX", 7830)
+TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX", 6171)
 EVAL_MIN_IDX = optional_nonnegative_int("EVAL_MIN_IDX", 15)
 EVAL_MAX_IDX = optional_nonnegative_int("EVAL_MAX_IDX", 35)
 SOURCE_OPTIONS = {
     TRAIN_SPLIT: {
-        "include": optional_string_list("TRAIN_INCLUDE_SOURCES"),
+        "include": optional_string_list("TRAIN_INCLUDE_SOURCES", '["dgxchen/nemotron-cot-tong", "nvidia-nemotron-model-reasoning-challenge"]'),
         "order": optional_string_list("TRAIN_ORDER_BY_SOURCES"),
         "exclude": optional_string_list("TRAIN_EXCLUDE_SOURCES"),
     },
@@ -118,7 +118,7 @@ SOURCE_OPTIONS = {
         "exclude": optional_string_list("EVAL_EXCLUDE_SOURCES"),
     },
 }
-TRAIN_SHUFFLE = os.environ.get("TRAIN_SHUFFLE", "1").lower() not in {
+TRAIN_SHUFFLE = os.environ.get("TRAIN_SHUFFLE", "0").lower() not in {
     "0",
     "false",
     "no",
@@ -128,9 +128,15 @@ EVAL_SHUFFLE = os.environ.get("EVAL_SHUFFLE", "1").lower() not in {
     "false",
     "no",
 }
+FILTER_HQ_BY_SPLIT = {
+    TRAIN_SPLIT: os.environ.get("TRAIN_FILTER_HQ", "0").lower()
+        not in {"0", "false", "no"},
+    EVAL_SPLIT: os.environ.get("EVAL_FILTER_HQ", "0").lower()
+        not in {"0", "false", "no"},
+}
 
 LORA_STAGE = os.environ.get("LORA_STAGE", "sft")
-LORA_VERSION = os.environ.get("LORA_VERSION", "v1")
+LORA_VERSION = os.environ.get("LORA_VERSION", "v2")
 RUN_NAME = os.environ.get("RUN_NAME", f"nemotron-{LORA_STAGE}-{LORA_VERSION}")
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", str(WORKING_DIR / RUN_NAME)))
 ADAPTER_OUTPUT_DIR = Path(
@@ -228,6 +234,23 @@ def is_trainable_example(example: dict[str, Any]) -> bool:
         clean_text(example.get("prompt")) is not None
         and clean_text(example.get("response")) is not None
     )
+
+
+HQ_SOURCES = {
+    "nvidia-nemotron-model-reasoning-challenge",
+    "dgxchen/nemotron-cot-tong",
+}
+
+HQ_ANSWER_TYPES = {"integer", "float", "fraction"}
+
+def is_high_quality_example(example: dict[str, Any]) -> bool:
+    if example.get("source") in HQ_SOURCES:
+        return True
+    answer_type = clean_text(example.get("answer_type"))
+    if answer_type is not None and answer_type.lower() in HQ_ANSWER_TYPES:
+        return True
+    final_answer = clean_text(example.get("final_answer"))
+    return final_answer is not None and final_answer.isalnum()
 
 
 def build_user_content(prompt: Any) -> str:
@@ -445,6 +468,26 @@ def prepare_split(
             print(f"{split_name}: no trainable examples after filtering")
             return None
         raise ValueError(f"{split_name} has no examples with non-empty responses")
+
+    if FILTER_HQ_BY_SPLIT.get(split_name):
+        before_hq = len(dataset)
+        dataset = dataset.filter(
+            is_high_quality_example,
+            num_proc=DATASET_NUM_PROC,
+            desc=f"{split_name}: keep high-quality examples",
+            keep_in_memory=KEEP_IN_MEMORY,
+        )
+        if not len(dataset):
+            if allow_empty:
+                print(f"{split_name}: no high-quality trainable examples")
+                return None
+            raise ValueError(
+                f"{split_name} has no high-quality trainable examples"
+            )
+        print(
+            f"{split_name}: HQ filter retained "
+            f"{len(dataset):,}/{before_hq:,} examples"
+        )
 
     from datasets import Features, List, Value
 

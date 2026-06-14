@@ -77,6 +77,21 @@ UPLOAD_TO_KAGGLE = os.environ.get("UPLOAD_TO_KAGGLE", "1").lower() not in {
     "false",
     "no",
 }
+DEDUPE_BY_SPLIT = {
+    "train": os.environ.get("TRAIN_DEDUPE", "1").lower() not in {"0", "false", "no"},
+    "validation": os.environ.get("VALIDATION_DEDUPE", "1").lower() not in {"0", "false", "no"},
+    "test": os.environ.get("TEST_DEDUPE", "1").lower() not in {"0", "false", "no"},
+}
+FILTER_HQ_BY_SPLIT = {
+    "train": os.environ.get("TRAIN_FILTER_HQ", "0").lower() not in {"0", "false", "no"},
+    "validation": os.environ.get("VALIDATION_FILTER_HQ", "0").lower() not in {"0", "false", "no"},
+    "test": os.environ.get("TEST_FILTER_HQ", "0").lower() not in {"0", "false", "no"},
+}
+SHUFFLE_BY_SPLIT = {
+    "train": os.environ.get("TRAIN_SHUFFLE", "1").lower() not in {"0", "false", "no"},
+    "validation": os.environ.get("VALIDATION_SHUFFLE", "1").lower() not in {"0", "false", "no"},
+    "test": os.environ.get("TEST_SHUFFLE", "1").lower() not in {"0", "false", "no"},
+}
 
 HF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 KAGGLE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -142,13 +157,30 @@ INTEGER_RE = re.compile(r"^[+-]?\d[\d,]*$")
 FLOAT_RE = re.compile(r"^[+-]?(?:\d[\d,]*\.\d+|\d[\d,]*[eE][+-]?\d+)$")
 FRACTION_RE = re.compile(r"^[+-]?(?:\d+\s*/\s*\d+|\\frac\s*\{.+?\}\s*\{.+?\})$")
 MULTIPLE_CHOICE_RE = re.compile(r"^(?:[A-Ea-e])$")
-
+LEVEL_RE = re.compile(r"\b([1-5])\b")
 
 def clean_text(value: Any) -> Optional[str]:
     if value is None:
         return None
     text = str(value).strip()
     return text or None
+
+
+HQ_SOURCES = {
+    "nvidia-nemotron-model-reasoning-challenge",
+    "dgxchen/nemotron-cot-tong",
+}
+
+HQ_ANSWER_TYPES = {"integer", "float", "fraction"}
+
+def is_high_quality_example(example: dict[str, Any]) -> bool:
+    if example.get("source") in HQ_SOURCES:
+        return True
+    answer_type = clean_text(example.get("answer_type"))
+    if answer_type is not None and answer_type.lower() in HQ_ANSWER_TYPES:
+        return True
+    final_answer = clean_text(example.get("final_answer"))
+    return final_answer is not None and final_answer.isalnum()
 
 
 def contains_url(value: Any) -> bool:
@@ -320,7 +352,7 @@ def infer_answer_type(value: Any, multiple_choice: bool = False) -> str:
 
 def normalize_difficulty(value: Any) -> str:
     text = (clean_text(value) or "").lower()
-    level_match = re.search(r"\b([1-5])\b", text)
+    level_match = LEVEL_RE.search(text)
     if level_match:
         level = int(level_match.group(1))
         return "easy" if level <= 2 else "medium" if level == 3 else "hard"
@@ -1120,41 +1152,71 @@ def build_final_dataset(configs: list[DatasetConfig]) -> DatasetDict:
             )
             continue
         combined = concatenate_datasets(parts)
-        selected_by_prompt: dict[str, tuple[int, int]] = {}
-        dedupe_combined = tqdm(
-            enumerate(combined), 
-            desc=f"Final dataset (split=`{split}`): dedupe by `prompt`",
-        )
-        for index, example in dedupe_combined:
-            prompt = example["prompt"]
-            response = clean_text(example.get("response"))
-            if prompt in selected_by_prompt:
-                current_index, current_score = selected_by_prompt[prompt]
-                if response is None:
-                    continue
-                score = len(response) + len(clean_text(example.get("reasoning")) or "")
-                if current_score >= 0 and current_score <= score:
-                    continue
-                selected_by_prompt[prompt] = (index, score)
-            else:
-                score = (
-                    len(response) + len(clean_text(example.get("reasoning")) or "")
-                    if response is not None
-                    else -1
-                )
-                selected_by_prompt[prompt] = (index, score)
+        if DEDUPE_BY_SPLIT.get(split):
+            selected_by_prompt: dict[str, tuple[int, int]] = {}
+            dedupe_combined = tqdm(
+                enumerate(combined),
+                desc=f"Final dataset (split=`{split}`): dedupe by `prompt`",
+            )
+            for index, example in dedupe_combined:
+                prompt = example["prompt"]
+                response = clean_text(example.get("response"))
+                if prompt in selected_by_prompt:
+                    _current_index, current_score = selected_by_prompt[prompt]
+                    if response is None:
+                        continue
+                    score = len(response) + len(
+                        clean_text(example.get("reasoning")) or ""
+                    )
+                    if current_score >= 0 and current_score <= score:
+                        continue
+                    selected_by_prompt[prompt] = (index, score)
+                else:
+                    score = (
+                        len(response)
+                        + len(clean_text(example.get("reasoning")) or "")
+                        if response is not None
+                        else -1
+                    )
+                    selected_by_prompt[prompt] = (index, score)
 
-        selected_indices = sorted(
-            index
-            for index, _score in selected_by_prompt.values()
-        )
-        deduplicated = combined.select(selected_indices, keep_in_memory=KEEP_IN_MEMORY)
-        removed = len(combined) - len(deduplicated)
-        print(f"{split}: removed {removed:,} duplicate prompts")
-        final_splits[split] = deduplicated.shuffle(
-            seed=configs[0].shuffle_seed,
-            keep_in_memory=KEEP_IN_MEMORY,
-        )
+            selected_indices = sorted(
+                index for index, _score in selected_by_prompt.values()
+            )
+            combined = combined.select(
+                selected_indices,
+                keep_in_memory=KEEP_IN_MEMORY,
+            )
+            print(
+                f"{split}: removed "
+                f"{sum(len(part) for part in parts) - len(combined):,} "
+                "duplicate prompts"
+            )
+
+        if FILTER_HQ_BY_SPLIT.get(split):
+            before_hq = len(combined)
+            combined = combined.filter(
+                is_high_quality_example,
+                num_proc=NUM_PROC,
+                desc=f"{split}: keep high-quality examples",
+                keep_in_memory=KEEP_IN_MEMORY,
+            )
+            print(
+                f"{split}: HQ filter retained "
+                f"{len(combined):,}/{before_hq:,} examples"
+            )
+
+        if SHUFFLE_BY_SPLIT.get(split):
+            combined = combined.shuffle(
+                seed=configs[0].shuffle_seed,
+                keep_in_memory=KEEP_IN_MEMORY,
+            )
+            print(
+                f"{split}: shuffled {len(combined):,} examples "
+                f"with seed {configs[0].shuffle_seed}"
+            )
+
+        final_splits[split] = combined
     return DatasetDict(final_splits)
 
 
@@ -1180,7 +1242,10 @@ def validate_final_dataset(
             )
         if len(set(dataset[split]["id"])) != len(dataset[split]):
             raise AssertionError(f"{split} contains duplicate ids")
-        if len(set(dataset[split]["prompt"])) != len(dataset[split]):
+        if (
+            DEDUPE_BY_SPLIT[split]
+            and len(set(dataset[split]["prompt"])) != len(dataset[split])
+        ):
             raise AssertionError(f"{split} contains duplicate prompts")
 
     print("Validated deduplicated split sizes:", actual_sizes)
