@@ -12,6 +12,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Optional
 
+import math_verify
+
 # %%
 # User secrets
 # try:
@@ -55,6 +57,11 @@ wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
 #     --no-index --find-links={wheels_dir}
 # !uv pip install --no-deps --upgrade \
 #     "torchao>=0.16.0" \
+#     --no-index --find-links={wheels_dir}
+# !uv pip install \
+#     "math-verify[antlr4_11_0]" \
+#     rapidfuzz \
+#     "antlr4-python3-runtime==4.11.0" \
 #     --no-index --find-links={wheels_dir}
 # !uv pip install vllm --no-index --find-links={wheels_dir}
 # !uv pip install "protobuf<6.0.0" --no-index --find-links={wheels_dir}
@@ -287,6 +294,11 @@ CACHE_MODEL_WEIGHTS = os.environ.get("CACHE_MODEL_WEIGHTS", "0").lower() not in 
 }
 CACHE_MODEL_WORKERS = int(os.environ.get("CACHE_MODEL_WORKERS", "16"))
 CACHE_MODEL_CHUNK_MB = int(os.environ.get("CACHE_MODEL_CHUNK_MB", "1024"))
+MATH_VERIFY_TIMEOUT_SECONDS = int(
+    os.environ.get("MATH_VERIFY_TIMEOUT_SECONDS", "5")
+)
+if MATH_VERIFY_TIMEOUT_SECONDS <= 0:
+    raise ValueError("MATH_VERIFY_TIMEOUT_SECONDS must be positive")
 
 UPLOAD_TO_HF = os.environ.get("UPLOAD_TO_HF", "0").lower() not in {
     "0",
@@ -347,10 +359,10 @@ def clean_text(value: Any) -> Optional[str]:
     return text or None
 
 
-def extract_final_answer(text: Optional[str]) -> str:
-    if text is None:
-        return "NOT_FOUND"
-
+def extract_competition_boxed_answer(text: Any) -> Optional[str]:
+    if not text:
+        return None
+    text = str(text)
     boxed_starts = list(BOXED_START_RE.finditer(text))
     matches = []
     for index, match in enumerate(boxed_starts):
@@ -368,6 +380,55 @@ def extract_final_answer(text: Optional[str]) -> str:
         if non_empty:
             return non_empty[-1]
         return matches[-1].strip()
+    return None
+
+
+def extract_boxed_spans(text: Any) -> list[tuple[int, int, str]]:
+    if not text:
+        return []
+
+    value = str(text)
+    spans: list[tuple[int, int, str]] = []
+    cursor = 0
+    marker = r"\boxed{"
+    while True:
+        start = value.find(marker, cursor)
+        if start < 0:
+            break
+        content_start = start + len(marker)
+        depth = 1
+        index = content_start
+        while index < len(value) and depth:
+            if value[index] == "{":
+                depth += 1
+            elif value[index] == "}":
+                depth -= 1
+            index += 1
+        if depth == 0:
+            spans.append((start, index, value[content_start : index - 1]))
+            cursor = index
+        else:
+            cursor = content_start
+    return spans
+
+
+def extract_balanced_boxed_answer(text: Any) -> Optional[str]:
+    spans = extract_boxed_spans(text)
+    if not spans:
+        return None
+    non_empty = [
+        answer.strip()
+        for _start, _end, answer in spans
+        if answer.strip()
+    ]
+    if non_empty:
+        return non_empty[-1]
+    return spans[-1][2].strip()
+
+
+def extract_fallback_answer(text: Optional[str]) -> str:
+    if text is None:
+        return "NOT_FOUND"
 
     for pattern in FALLBACK_ANSWER_PATTERNS:
         matches = pattern.findall(text)
@@ -382,24 +443,58 @@ def extract_final_answer(text: Optional[str]) -> str:
     return lines[-1] if lines else "NOT_FOUND"
 
 
+def extract_final_answers(text: Optional[str]) -> list[str]:
+    answers = [
+        extract_competition_boxed_answer(text),
+        extract_balanced_boxed_answer(text),
+    ]
+    unique_answers = list(
+        dict.fromkeys(answer for answer in answers if clean_text(answer) is not None)
+    )
+    if unique_answers:
+        return unique_answers
+    return [extract_fallback_answer(text)]
+
+
+def extract_final_answer(text: Optional[str]) -> str:
+    return extract_final_answers(text)[0]
+
+
 def verify(stored_answer: Any, predicted: Any) -> bool:
     stored = clean_text(stored_answer)
     prediction = clean_text(predicted)
-    if stored is None or prediction is None or prediction == "NOT_FOUND":
-        return False
+    if not stored:
+        return not prediction or prediction == "NOT_FOUND"
 
     if BINARY_RE.fullmatch(stored):
-        return prediction.lower() == stored.lower()
-
+        return prediction.casefold() == stored.casefold()
+    
     try:
-        return math.isclose(
+        if math.isclose(
             float(stored),
             float(prediction),
             rel_tol=1e-2,
             abs_tol=1e-5,
-        )
+        ):
+            return True
     except Exception:
-        return prediction.lower() == stored.lower()
+        pass
+
+    try:
+        if math_verify.verify(
+            math_verify.parse(stored),
+            math_verify.parse(prediction),
+            float_rounding=2,
+            numeric_precision=2,
+            strict=True,
+            allow_set_relation_comp=True,
+            timeout_seconds=MATH_VERIFY_TIMEOUT_SECONDS,
+        ):
+            return True
+    except Exception:
+        pass
+
+    return prediction.casefold() == stored.casefold()
 
 
 def combine_reasoning_response(reasoning: Any, response: Any) -> Optional[str]:
@@ -436,12 +531,12 @@ def select_preference(
 ) -> dict[str, Any]:
     stored_answer = clean_text(example.get("final_answer"))
     extracted_answers = [
-        extract_final_answer(output)
+        extract_final_answers(output)
         for output in trajectory_outputs
     ]
     correctness = [
-        verify(stored_answer, answer)
-        for answer in extracted_answers
+        any(verify(stored_answer, answer) for answer in answers)
+        for answers in extracted_answers
     ]
 
     indexed_outputs = list(enumerate(trajectory_outputs))

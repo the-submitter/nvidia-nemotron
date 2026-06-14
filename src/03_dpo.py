@@ -119,6 +119,16 @@ SOURCE_OPTIONS = {
         "exclude": optional_string_list("EVAL_EXCLUDE_SOURCES"),
     },
 }
+TRAIN_SHUFFLE = os.environ.get("TRAIN_SHUFFLE", "1").lower() not in {
+    "0",
+    "false",
+    "no",
+}
+EVAL_SHUFFLE = os.environ.get("EVAL_SHUFFLE", "1").lower() not in {
+    "0",
+    "false",
+    "no",
+}
 
 DPO_STAGE = os.environ.get("DPO_STAGE", "dpo")
 DPO_VERSION = os.environ.get("DPO_VERSION", "v1")
@@ -407,7 +417,12 @@ def apply_source_options(dataset, split_name: str):
     return ordered
 
 
-def prepare_split(dataset, tokenizer, split_name: str):
+def prepare_split(
+    dataset,
+    tokenizer,
+    split_name: str,
+    allow_empty: bool = False,
+):
     original_size = len(dataset)
     dataset = dataset.filter(
         is_preference_example,
@@ -416,6 +431,9 @@ def prepare_split(dataset, tokenizer, split_name: str):
         keep_in_memory=KEEP_IN_MEMORY,
     )
     if not len(dataset):
+        if allow_empty:
+            print(f"{split_name}: no complete preference examples after filtering")
+            return None
         raise ValueError(
             f"{split_name} has no examples with non-empty chosen and rejected"
         )
@@ -441,10 +459,9 @@ def select_index_range(
     min_idx: Optional[int],
     max_idx: Optional[int],
     split_name: str,
+    shuffle: bool = False,
+    seed: int = SEED,
 ):
-    if min_idx is None and max_idx is None:
-        return dataset
-
     start = 0 if min_idx is None else min_idx
     stop = len(dataset) if max_idx is None else min(max_idx, len(dataset))
     if start > stop:
@@ -456,15 +473,23 @@ def select_index_range(
             f"{split_name}: min index {start} is outside dataset size {len(dataset)}"
         )
 
-    selected = dataset.select(range(start, stop), keep_in_memory=KEEP_IN_MEMORY)
+    selected = (
+        dataset
+        if start == 0 and stop == len(dataset)
+        else dataset.select(range(start, stop), keep_in_memory=KEEP_IN_MEMORY)
+    )
     if not len(selected):
         raise ValueError(
             f"{split_name}: index range [{start}, {stop}) selected no examples"
         )
-    print(
-        f"{split_name}: selected [{start:,}, {stop:,}) "
-        f"({len(selected):,} examples)"
-    )
+    if min_idx is not None or max_idx is not None:
+        print(
+            f"{split_name}: selected [{start:,}, {stop:,}) "
+            f"({len(selected):,} examples)"
+        )
+    if shuffle:
+        selected = selected.shuffle(seed=seed, keep_in_memory=KEEP_IN_MEMORY)
+        print(f"{split_name}: shuffled {len(selected):,} examples with seed {seed}")
     return selected
 
 
@@ -484,6 +509,8 @@ def prepare_datasets(tokenizer):
         TRAIN_MIN_IDX,
         TRAIN_MAX_IDX,
         TRAIN_SPLIT,
+        TRAIN_SHUFFLE,
+        SEED,
     )
 
     eval_dataset = None
@@ -492,30 +519,20 @@ def prepare_datasets(tokenizer):
             dataset_dict[EVAL_SPLIT],
             EVAL_SPLIT,
         )
-        filtered_eval = eval_source_dataset.filter(
-            is_preference_example,
-            num_proc=DATASET_NUM_PROC,
-            desc=f"{EVAL_SPLIT}: check complete preferences",
-            keep_in_memory=KEEP_IN_MEMORY,
+        eval_dataset = prepare_split(
+            eval_source_dataset,
+            tokenizer,
+            EVAL_SPLIT,
+            allow_empty=True,
         )
-        if len(filtered_eval):
-            eval_dataset = filtered_eval.map(
-                render_dpo_example,
-                fn_kwargs={"tokenizer": tokenizer},
-                remove_columns=filtered_eval.column_names,
-                num_proc=DATASET_NUM_PROC,
-                desc=f"{EVAL_SPLIT}: apply DPO chat template",
-                keep_in_memory=KEEP_IN_MEMORY,
-            )
+        if eval_dataset is not None:
             eval_dataset = select_index_range(
                 eval_dataset,
                 EVAL_MIN_IDX,
                 EVAL_MAX_IDX,
                 EVAL_SPLIT,
-            )
-            print(
-                f"{EVAL_SPLIT}: retained {len(eval_dataset):,}/"
-                f"{len(dataset_dict[EVAL_SPLIT]):,} examples"
+                EVAL_SHUFFLE,
+                SEED,
             )
     return train_dataset, eval_dataset
 

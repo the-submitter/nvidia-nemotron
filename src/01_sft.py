@@ -118,6 +118,16 @@ SOURCE_OPTIONS = {
         "exclude": optional_string_list("EVAL_EXCLUDE_SOURCES"),
     },
 }
+TRAIN_SHUFFLE = os.environ.get("TRAIN_SHUFFLE", "1").lower() not in {
+    "0",
+    "false",
+    "no",
+}
+EVAL_SHUFFLE = os.environ.get("EVAL_SHUFFLE", "1").lower() not in {
+    "0",
+    "false",
+    "no",
+}
 
 LORA_STAGE = os.environ.get("LORA_STAGE", "sft")
 LORA_VERSION = os.environ.get("LORA_VERSION", "v1")
@@ -150,18 +160,18 @@ DATASET_NUM_PROC = DATASET_WORKERS if DATASET_WORKERS > 1 else None
 SEED = int(os.environ.get("SEED", "3407"))
 
 PER_DEVICE_TRAIN_BATCH_SIZE = int(
-    os.environ.get("PER_DEVICE_TRAIN_BATCH_SIZE", "3")
+    os.environ.get("PER_DEVICE_TRAIN_BATCH_SIZE", "2")
 )
-PER_DEVICE_EVAL_BATCH_SIZE = int(os.environ.get("PER_DEVICE_EVAL_BATCH_SIZE", "3"))
+PER_DEVICE_EVAL_BATCH_SIZE = int(os.environ.get("PER_DEVICE_EVAL_BATCH_SIZE", "2"))
 GRADIENT_ACCUMULATION_STEPS = int(
-    os.environ.get("GRADIENT_ACCUMULATION_STEPS", "10")
+    os.environ.get("GRADIENT_ACCUMULATION_STEPS", "16")
 )
 NUM_TRAIN_EPOCHS = float(os.environ.get("NUM_TRAIN_EPOCHS", "1"))
 MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))
 LEARNING_RATE = float(os.environ.get("LEARNING_RATE", "2e-4"))
 WARMUP_STEPS = int(os.environ.get("WARMUP_STEPS", "10"))
 LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "10"))
-SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "9"))
+SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "10"))
 EVAL_STEPS = int(os.environ.get("EVAL_STEPS", str(SAVE_STEPS)))
 SAVE_TOTAL_LIMIT = int(os.environ.get("SAVE_TOTAL_LIMIT", "2"))
 
@@ -235,16 +245,15 @@ def build_conversation(example: dict[str, Any]) -> dict[str, Any]:
     assistant_message = {
         "role": "assistant",
         "content": response,
+        "reasoning_content": clean_text(example.get("reasoning")),
     }
-    reasoning = clean_text(example.get("reasoning"))
-    if reasoning is not None:
-        assistant_message["reasoning_content"] = reasoning
 
     return {
         "conversations": [
             {
                 "role": "user",
                 "content": build_user_content(example.get("prompt")),
+                "reasoning_content": None,
             },
             assistant_message,
         ]
@@ -257,6 +266,14 @@ def render_conversations(
 ) -> dict[str, list[str]]:
     texts = []
     for conversation in examples["conversations"]:
+        # template_conversation = [
+        #     {
+        #         key: value
+        #         for key, value in message.items()
+        #         if (key != "reasoning_content" and key != "reasoning") or value is not None
+        #     }
+        #     for message in conversation
+        # ]
         text = tokenizer.apply_chat_template(
             conversation,
             tokenize=False,
@@ -277,6 +294,14 @@ def render_conversations(
             )
             fallback_conversation[-1] = fallback_assistant
             text = tokenizer.apply_chat_template(
+                # [
+                #     {
+                #         key: value
+                #         for key, value in message.items()
+                #         if value is not None
+                #     }
+                #     for message in fallback_conversation
+                # ],
                 fallback_conversation,
                 tokenize=False,
                 add_generation_prompt=False,
@@ -402,26 +427,46 @@ def apply_source_options(dataset, split_name: str):
     return ordered
 
 
-def prepare_split(dataset, tokenizer, split_name: str, already_filtered: bool = False):
+def prepare_split(
+    dataset,
+    tokenizer,
+    split_name: str,
+    allow_empty: bool = False,
+):
     original_size = len(dataset)
-    if not already_filtered:
-        dataset = dataset.filter(
-            is_trainable_example,
-            num_proc=DATASET_NUM_PROC,
-            desc=f"{split_name}: keep non-empty responses",
-            keep_in_memory=KEEP_IN_MEMORY,
-        )
+    dataset = dataset.filter(
+        is_trainable_example,
+        num_proc=DATASET_NUM_PROC,
+        desc=f"{split_name}: keep non-empty responses",
+        keep_in_memory=KEEP_IN_MEMORY,
+    )
     if not len(dataset):
+        if allow_empty:
+            print(f"{split_name}: no trainable examples after filtering")
+            return None
         raise ValueError(f"{split_name} has no examples with non-empty responses")
 
+    from datasets import Features, List, Value
+
+    conversation_features = Features(
+        {
+            "conversations": List(
+                {
+                    "role": Value("string"),
+                    "content": Value("string"),
+                    "reasoning_content": Value("string"),
+                }
+            )
+        }
+    )
     dataset = dataset.map(
         build_conversation,
         remove_columns=dataset.column_names,
+        features=conversation_features,
         num_proc=DATASET_NUM_PROC,
         desc=f"{split_name}: build conversations",
         keep_in_memory=KEEP_IN_MEMORY,
     )
-    conversation_features = dataset.features
     dataset = dataset.map(
         render_conversations,
         batched=True,
@@ -443,10 +488,9 @@ def select_index_range(
     min_idx: Optional[int],
     max_idx: Optional[int],
     split_name: str,
+    shuffle: bool = False,
+    seed: int = SEED,
 ):
-    if min_idx is None and max_idx is None:
-        return dataset
-
     start = 0 if min_idx is None else min_idx
     stop = len(dataset) if max_idx is None else min(max_idx, len(dataset))
     if start > stop:
@@ -458,15 +502,23 @@ def select_index_range(
             f"{split_name}: min index {start} is outside dataset size {len(dataset)}"
         )
 
-    selected = dataset.select(range(start, stop), keep_in_memory=KEEP_IN_MEMORY)
+    selected = (
+        dataset
+        if start == 0 and stop == len(dataset)
+        else dataset.select(range(start, stop), keep_in_memory=KEEP_IN_MEMORY)
+    )
     if not len(selected):
         raise ValueError(
             f"{split_name}: index range [{start}, {stop}) selected no examples"
         )
-    print(
-        f"{split_name}: selected [{start:,}, {stop:,}) "
-        f"({len(selected):,} examples)"
-    )
+    if min_idx is not None or max_idx is not None:
+        print(
+            f"{split_name}: selected [{start:,}, {stop:,}) "
+            f"({len(selected):,} examples)"
+        )
+    if shuffle:
+        selected = selected.shuffle(seed=seed, keep_in_memory=KEEP_IN_MEMORY)
+        print(f"{split_name}: shuffled {len(selected):,} examples with seed {seed}")
     return selected
 
 
@@ -486,6 +538,8 @@ def prepare_datasets(tokenizer):
         TRAIN_MIN_IDX,
         TRAIN_MAX_IDX,
         TRAIN_SPLIT,
+        TRAIN_SHUFFLE,
+        SEED,
     )
 
     eval_dataset = None
@@ -494,24 +548,20 @@ def prepare_datasets(tokenizer):
             dataset_dict[EVAL_SPLIT],
             EVAL_SPLIT,
         )
-        filtered_eval = eval_source_dataset.filter(
-            is_trainable_example,
-            num_proc=DATASET_NUM_PROC,
-            desc=f"{EVAL_SPLIT}: check non-empty responses",
-            keep_in_memory=KEEP_IN_MEMORY,
+        eval_dataset = prepare_split(
+            eval_source_dataset,
+            tokenizer,
+            EVAL_SPLIT,
+            allow_empty=True,
         )
-        if len(filtered_eval):
-            eval_dataset = prepare_split(
-                filtered_eval,
-                tokenizer,
-                EVAL_SPLIT,
-                already_filtered=True,
-            )
+        if eval_dataset is not None:
             eval_dataset = select_index_range(
                 eval_dataset,
                 EVAL_MIN_IDX,
                 EVAL_MAX_IDX,
                 EVAL_SPLIT,
+                EVAL_SHUFFLE,
+                SEED,
             )
     return train_dataset, eval_dataset
 
