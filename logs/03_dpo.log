@@ -1,0 +1,338 @@
+🦥 Unsloth: Will patch your computer to enable 2x faster free finetuning.
+2026-06-15 09:00:36.116577: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1781514036.126234    1043 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1781514036.130090    1043 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1781514036.137628    1043 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1781514036.137638    1043 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1781514036.137639    1043 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1781514036.137640    1043 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+⚙️  Running in WANDB offline mode
+🦥 Unsloth Zoo will now patch everything to make training faster!
+
+Unsloth: WARNING `trust_remote_code` is True.
+Are you certain you want to do remote code execution?
+==((====))==  Unsloth 2026.3.17: Fast Nemotron_H patching. Transformers: 4.57.6.
+   \\   /|    NVIDIA RTX PRO 6000 Blackwell Server Edition. Num GPUs = 1. Max memory: 94.971 GB. Platform: Linux.
+O^O/ \_/ \    Torch: 2.10.0+cu128. CUDA: 12.0. CUDA Toolkit: 12.8. Triton: 3.6.0
+\        /    Bfloat16 = TRUE. FA [Xformers = 0.0.35. FA2 = False]
+ "-____-"     Free license: http://github.com/unslothai/unsloth
+Unsloth: Fast downloading is enabled - ignore downloading bars which are red colored!
+Unsloth: QLoRA and full finetuning all not selected. Switching to 16bit LoRA.
+Loading checkpoint shards: 100%
+ 13/13 [00:06<00:00,  2.12it/s]
+Unsloth: PEFT set target_parameters but found no matching parameters.
+This is expected for MoE models - Unsloth handles MoE expert LoRA targeting separately.
+Trainable adapter parameters: 883,873,792
+
+train: source order=['nvidia-nemotron-model-reasoning-challenge', 'dgxchen/nemotron-cot-tong', 'qwedsacf/competition_math', 'open-r1/OpenR1-Math-220k', 'EleutherAI/drop', 'tasksource/proofwriter', 'AI-MO/NuminaMath-1.5', 'openai/gsm8k', 'yale-nlp/FOLIO', 'BytedTsinghua-SIA/Enigmata-Eval', 'nvidia/OpenMathReasoning', 'WildEval/ZebraLogic', 'EleutherAI/asdiv', 'renma/ProntoQA', 'ChilleD/SVAMP']; retained=78,868
+train: keep complete preferences (num_proc=8): 100%
+ 78868/78868 [00:03<00:00, 29904.21 examples/s]
+train: keep high-quality examples (num_proc=8): 100%
+ 175/175 [00:03<00:00, 61.07 examples/s]
+train: HQ filter retained 162/175 examples
+train: apply DPO chat template (num_proc=8): 100%
+ 162/162 [00:05<00:00, 37.33 examples/s]
+train: retained 162/78,868 examples
+train: selected [0, 100) (100 examples)
+
+Extracting prompt in train dataset (num_proc=8): 100%
+ 100/100 [00:00<00:00, 45.99 examples/s]
+Applying chat template to train dataset (num_proc=8): 100%
+ 100/100 [00:01<00:00, 104.97 examples/s]
+Tokenizing train dataset (num_proc=8): 100%
+ 100/100 [00:01<00:00, 116.21 examples/s]
+
+Train dataset reference log probs: 100%
+ 100/100 [03:24<00:00,  2.02s/it]
+Unsloth: Will smartly offload gradients to save VRAM!
+wandb: ERROR Unable to load kaggle notebook.
+ [75/75 23:29, Epoch 3/3]
+Step	Training Loss	rewards / chosen	rewards / rejected	rewards / accuracies	rewards / margins	logps / chosen	logps / rejected	logits / chosen	logits / rejected
+1	3.939800	206.125427	209.807022	0.250000	-3.681583	-9.119244	-10.528305	-1.481219	-1.468398
+2	0.691700	149.591797	149.531464	0.500000	0.060329	-2.493165	-3.521931	-1.497294	-1.492391
+3	20.593400	313.042603	333.454956	0.250000	-20.412331	-35.830650	-21.047699	-1.174009	-1.290397
+4	5.773300	179.729614	180.807892	0.500000	-1.078279	-29.399897	-29.738039	-0.920299	-0.875346
+5	3.992400	128.891785	128.121826	0.250000	0.769962	-53.153938	-68.133598	-1.097478	-0.878520
+6	0.762100	144.431488	136.429489	0.500000	8.002000	-81.393799	-91.920776	-1.013441	-0.957926
+7	2.783600	215.250809	216.992401	0.500000	-1.741594	-590.509521	-594.719666	-0.246901	-0.218470
+8	1.799700	160.183701	161.522141	0.250000	-1.338430	-352.367676	-360.704987	-0.409230	-0.382476
+9	1.176400	182.581528	181.910355	0.750000	0.671154	-465.658630	-467.538605	0.003564	0.001115
+10	0.860400	127.659698	127.321701	0.500000	0.337997	-771.093689	-770.513306	0.039924	0.057747
+11	2.297100	128.568237	120.193748	0.500000	8.374485	-675.111511	-712.347107	0.130233	0.171338
+12	2.002700	118.814034	119.717712	0.500000	-0.903683	-364.103210	-402.087860	-0.311661	-0.251052
+13	2.989700	144.353439	139.742722	0.750000	4.610731	-1157.044678	-1162.633545	0.814936	0.804975
+14	0.601000	89.342712	84.433472	0.750000	4.909251	-421.509033	-453.021423	-0.242610	-0.099565
+15	0.241900	86.763168	81.580757	1.000000	5.182421	-452.844299	-438.171509	-0.217204	-0.200307
+16	0.983700	110.196457	101.108528	0.500000	9.087934	-879.029968	-885.641052	0.483416	0.640817
+17	1.659700	112.516014	108.167122	0.500000	4.348887	-801.511963	-863.676392	0.338225	0.503383
+18	2.289300	105.405762	104.671066	0.500000	0.734693	-939.441040	-994.479370	0.658432	0.789375
+19	0.000000	68.782585	38.491222	1.000000	30.291363	-2012.699707	-2148.121582	0.739217	0.737216
+20	17.276400	-209.010345	-192.643250	0.500000	-16.367126	-4533.767578	-4323.293457	0.205669	0.215386
+21	1.900900	-132.816681	-154.305069	0.750000	21.488384	-4098.725586	-4365.682129	0.459620	0.470808
+22	2.562600	-121.881111	-124.597305	0.500000	2.716191	-3741.252197	-3751.572998	0.566325	0.564573
+23	0.175400	-35.842693	-46.251160	0.750000	10.408472	-2334.742920	-2488.333496	0.552932	0.607157
+24	4.410600	18.182259	21.449797	0.250000	-3.267540	-1909.366943	-1884.976074	0.179899	0.169931
+25	0.039700	49.476837	37.449081	1.000000	12.027757	-1345.796387	-1423.439575	0.065987	0.335405
+26	0.196900	70.249420	64.298798	1.000000	5.950621	-45.132477	-133.526932	-0.836087	-0.731998
+27	2.475500	39.839035	37.459152	0.500000	2.379880	-1866.039917	-1871.721924	0.125317	0.150201
+28	0.037300	42.292229	36.545925	1.000000	5.746305	-2256.209717	-2327.404297	0.588282	0.616211
+29	0.005200	43.759754	31.554134	1.000000	12.205621	-1462.864746	-1679.466553	0.495348	0.785985
+30	0.354200	67.118423	66.181519	1.000000	0.936907	-18.937513	-34.793236	-1.099728	-1.074098
+31	1.084400	59.308464	56.986225	0.500000	2.322236	-1311.393188	-1352.009033	0.288103	0.310803
+32	0.132100	72.789055	70.808159	1.000000	1.980897	-657.750122	-701.323059	-0.440796	-0.376501
+33	0.496100	76.307236	72.219658	0.750000	4.087584	-1186.377441	-1264.552490	0.027124	0.082670
+34	0.117700	74.356171	68.140961	1.000000	6.215212	-1164.708496	-1309.051514	0.006908	0.023917
+35	0.162500	68.903862	66.728577	1.000000	2.175292	-28.951023	-65.622131	-1.068923	-1.013125
+36	0.822400	62.715363	61.126686	0.750000	1.588675	-1946.133911	-1996.078369	1.095412	1.172357
+37	0.051800	74.744804	59.194473	1.000000	15.550330	-1075.383545	-1164.210571	-0.086027	0.094251
+38	0.205100	81.158180	76.295479	0.750000	4.862709	-2128.899414	-2139.896729	0.589929	0.585473
+39	0.073100	64.593132	56.971725	1.000000	7.621405	-1955.937012	-2027.631470	0.629028	0.577201
+40	0.161000	89.946732	87.941292	1.000000	2.005445	-1418.806396	-1441.374756	0.162728	0.166811
+41	1.299900	56.302158	47.293125	0.500000	9.009036	-1492.020508	-1578.739502	-0.026219	0.016375
+42	0.133700	61.557182	56.858452	1.000000	4.698730	-1363.562012	-1408.730713	-0.052776	-0.022651
+43	0.076300	60.889275	48.737274	1.000000	12.152002	-1298.335327	-1497.929199	0.024829	0.078126
+44	0.799100	61.503548	48.886253	0.750000	12.617291	-1286.981201	-1315.559326	-0.067548	0.202595
+45	0.257300	55.034836	51.397305	0.750000	3.637530	-1590.261597	-1634.344116	-0.035905	-0.021288
+46	0.042200	64.800835	39.948792	1.000000	24.852039	-1632.006470	-1669.261719	-0.125960	0.095119
+47	0.562300	-6.067188	-11.508137	0.750000	5.440948	-3119.679688	-3190.480469	1.008567	1.009015
+48	3.181700	-14.188904	-11.670649	0.500000	-2.518256	-3282.371826	-3257.542969	1.001590	1.001979
+49	0.159100	26.387545	22.663355	1.000000	3.724188	-2359.283691	-2438.895020	0.528870	0.541941
+50	0.000300	28.587446	6.667743	1.000000	21.919704	-1684.445068	-1749.512573	0.023766	0.201887
+51	0.214100	52.641205	50.177349	1.000000	2.463859	-886.762573	-942.453064	-0.583141	-0.534490
+52	0.037300	43.582497	37.886387	1.000000	5.696109	-1594.666016	-1722.656494	-0.134067	-0.109975
+53	0.002000	61.332272	48.888168	1.000000	12.444099	-831.306763	-945.246094	-0.048266	0.059699
+54	0.094000	60.149330	54.764977	1.000000	5.384356	-1521.828125	-1609.767822	-0.133420	-0.071738
+55	0.000000	40.515568	22.529995	1.000000	17.985571	-1568.130127	-1727.686768	0.049031	0.134520
+56	0.030200	54.679649	41.593910	1.000000	13.085738	-2190.609375	-2357.004883	0.488613	0.635032
+57	0.047900	57.131516	38.036991	1.000000	19.094522	-1291.399658	-1522.583740	-0.126636	-0.096555
+58	0.551200	48.200058	46.222603	0.750000	1.977454	-2179.906250	-2181.130127	0.466158	0.480742
+59	0.015200	60.813118	50.268887	1.000000	10.544230	-1515.445068	-1579.231445	-0.059403	-0.015610
+60	0.496800	52.294044	40.851318	0.750000	11.442731	-2010.330200	-2082.641602	0.490799	0.613519
+61	0.080500	78.001709	74.911171	1.000000	3.090533	-21.038033	-60.955345	-1.274948	-1.207552
+62	0.027000	53.725647	48.947247	1.000000	4.778399	-2096.876953	-2171.794434	0.516413	0.561315
+63	0.047500	64.868050	59.179546	1.000000	5.688503	-723.075684	-776.813232	-0.639290	-0.467384
+64	0.097000	52.332066	42.276520	1.000000	10.055548	-709.734314	-754.461060	-0.783252	-0.750775
+65	0.026800	42.537254	35.573467	1.000000	6.963787	-2045.073608	-2082.989258	0.545228	0.586066
+66	0.032700	75.573334	71.289574	1.000000	4.283764	-1418.312622	-1597.861816	0.172451	0.179849
+67	0.731400	51.254868	43.047596	0.750000	8.207270	-2053.722656	-2054.104980	0.521374	0.792048
+68	0.171700	54.130714	52.000397	1.000000	2.130319	-1470.100464	-1485.822144	-0.091968	-0.025039
+69	0.097700	68.467712	63.006077	1.000000	5.461637	-1325.821533	-1440.365234	-0.002490	0.071057
+70	0.053400	52.425888	44.439301	1.000000	7.986584	-2130.896973	-2188.314941	0.513897	0.671987
+71	0.053200	57.750504	50.400005	1.000000	7.350498	-759.798462	-901.921265	-0.139327	0.070197
+72	0.221100	65.016693	55.494663	0.750000	9.522034	-1374.025757	-1457.973267	-0.039435	0.038063
+73	0.539000	61.536373	54.418701	0.750000	7.117669	-1353.416504	-1428.512573	-0.117344	-0.042651
+74	0.182100	46.989754	44.749794	1.000000	2.239961	-2779.960693	-2809.057129	1.106290	1.123039
+75	0.001100	73.010658	43.161842	1.000000	29.848812	-1319.515381	-1344.407715	-0.083446	0.158130
+
+Training runtime: 1534.42 seconds (25.57 minutes)
+Peak reserved VRAM: 94.07 GiB
+Saved DPO-trained LoRA adapter to /kaggle/working/nemotron-lora-dpo-v1
+
+Note: Environment variable`HF_TOKEN` is set and is the current active token independently from the token you've just configured.
+Processing Files (2 / 2): 100%
+ 3.55GB / 3.55GB,  120MB/s  
+New Data Upload: 100%
+ 3.53GB / 3.53GB,  120MB/s  
+Upload to Hugging Face succeeded
+
+Uploading Model https://api.kaggle.com/models/rohitraje0493/nemotron-3-nano/transformers/lora-dpo ...
+Warning: Looks like you're using an outdated `kagglehub` version (installed: 1.0.0), please consider upgrading to the latest version (1.0.2)Starting upload for file /kaggle/working/nemotron-lora-dpo-v1/README.md
+Uploading: 100%|██████████| 5.26k/5.26k [00:00<00:00, 15.0kB/s]
+Upload successful: /kaggle/working/nemotron-lora-dpo-v1/README.md (5KB)
+Starting upload for file /kaggle/working/nemotron-lora-dpo-v1/chat_template.jinja
+
+Uploading: 100%|██████████| 10.5k/10.5k [00:00<00:00, 29.3kB/s]
+Upload successful: /kaggle/working/nemotron-lora-dpo-v1/chat_template.jinja (10KB)
+Starting upload for file /kaggle/working/nemotron-lora-dpo-v1/tokenizer.json
+
+Uploading: 100%|██████████| 17.1M/17.1M [00:01<00:00, 11.0MB/s]
+Upload successful: /kaggle/working/nemotron-lora-dpo-v1/tokenizer.json (16MB)
+Starting upload for file /kaggle/working/nemotron-lora-dpo-v1/tokenizer_config.json
+
+Uploading: 100%|██████████| 177k/177k [00:00<00:00, 280kB/s]
+Upload successful: /kaggle/working/nemotron-lora-dpo-v1/tokenizer_config.json (173KB)
+Starting upload for file /kaggle/working/nemotron-lora-dpo-v1/adapter_model.safetensors
+
+Uploading: 100%|██████████| 3.54G/3.54G [01:20<00:00, 43.9MB/s]
+Upload successful: /kaggle/working/nemotron-lora-dpo-v1/adapter_model.safetensors (3GB)
+Starting upload for file /kaggle/working/nemotron-lora-dpo-v1/adapter_config.json
+
+Uploading: 100%|██████████| 1.31k/1.31k [00:00<00:00, 3.45kB/s]
+Upload successful: /kaggle/working/nemotron-lora-dpo-v1/adapter_config.json (1KB)
+Starting upload for file /kaggle/working/nemotron-lora-dpo-v1/special_tokens_map.json
+
+Uploading: 100%|██████████| 566/566 [00:00<00:00, 1.60kB/s]
+Upload successful: /kaggle/working/nemotron-lora-dpo-v1/special_tokens_map.json (566B)
+
+Your model instance has been created.
+Files are being processed...
+See at: https://api.kaggle.com/models/rohitraje0493/nemotron-3-nano/transformers/lora-dpo
+Uploading Dataset https://api.kaggle.com/datasets/rohitraje0493/nemotron-dpo ...
+More than 50 files detected, creating a zip archive...
+Starting upload for file /tmp/tmpnegzxisx/archive.zip
+Uploading: 100%|██████████| 17.8G/17.8G [06:51<00:00, 43.3MB/s]  
+Upload successful: /tmp/tmpnegzxisx/archive.zip (17GB)
+
+Your dataset has been created.
+Files are being processed...
+See at: https://api.kaggle.com/datasets/rohitraje0493/nemotron-dpo
+Upload to Kaggle succeeded
+
+---------------------
+
+🦥 Unsloth: Will patch your computer to enable 2x faster free finetuning.
+2026-06-15 12:49:38.778749: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1781527778.788625    1394 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1781527778.792477    1394 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1781527778.800067    1394 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1781527778.800080    1394 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1781527778.800081    1394 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1781527778.800081    1394 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+⚙️  Running in WANDB offline mode
+🦥 Unsloth Zoo will now patch everything to make training faster!
+
+Unsloth: WARNING `trust_remote_code` is True.
+Are you certain you want to do remote code execution?
+==((====))==  Unsloth 2026.3.17: Fast Nemotron_H patching. Transformers: 4.57.6.
+   \\   /|    NVIDIA RTX PRO 6000 Blackwell Server Edition. Num GPUs = 1. Max memory: 94.971 GB. Platform: Linux.
+O^O/ \_/ \    Torch: 2.10.0+cu128. CUDA: 12.0. CUDA Toolkit: 12.8. Triton: 3.6.0
+\        /    Bfloat16 = TRUE. FA [Xformers = 0.0.35. FA2 = False]
+ "-____-"     Free license: http://github.com/unslothai/unsloth
+Unsloth: Fast downloading is enabled - ignore downloading bars which are red colored!
+Unsloth: QLoRA and full finetuning all not selected. Switching to 16bit LoRA.
+Loading checkpoint shards: 100%
+ 13/13 [00:06<00:00,  2.11it/s]
+Unsloth: PEFT set target_parameters but found no matching parameters.
+This is expected for MoE models - Unsloth handles MoE expert LoRA targeting separately.
+Trainable adapter parameters: 883,873,792
+
+train: source order=['nvidia-nemotron-model-reasoning-challenge', 'dgxchen/nemotron-cot-tong', 'qwedsacf/competition_math', 'open-r1/OpenR1-Math-220k', 'EleutherAI/drop', 'tasksource/proofwriter', 'AI-MO/NuminaMath-1.5', 'openai/gsm8k', 'yale-nlp/FOLIO', 'BytedTsinghua-SIA/Enigmata-Eval', 'nvidia/OpenMathReasoning', 'WildEval/ZebraLogic', 'EleutherAI/asdiv', 'renma/ProntoQA', 'ChilleD/SVAMP']; retained=78,868
+train: keep complete preferences (num_proc=8): 100%
+ 78868/78868 [00:03<00:00, 29660.34 examples/s]
+train: keep high-quality examples (num_proc=8): 100%
+ 175/175 [00:03<00:00, 61.13 examples/s]
+train: HQ filter retained 162/175 examples
+train: apply DPO chat template (num_proc=8): 100%
+ 162/162 [00:05<00:00, 37.15 examples/s]
+train: retained 162/78,868 examples
+train: selected [0, 100) (100 examples)
+
+Extracting prompt in train dataset (num_proc=8): 100%
+ 100/100 [00:00<00:00, 41.79 examples/s]
+Applying chat template to train dataset (num_proc=8): 100%
+ 100/100 [00:01<00:00, 100.04 examples/s]
+Tokenizing train dataset (num_proc=8): 100%
+ 100/100 [00:01<00:00, 101.51 examples/s]
+
+Train dataset reference log probs: 100%
+ 100/100 [03:25<00:00,  2.07s/it]
+Unsloth: Will smartly offload gradients to save VRAM!
+wandb: ERROR Unable to load kaggle notebook.
+ [50/50 15:27, Epoch 2/2]
+Step	Training Loss	rewards / chosen	rewards / rejected	rewards / accuracies	rewards / margins	logps / chosen	logps / rejected	logits / chosen	logits / rejected
+1	3.939800	206.125427	209.807022	0.250000	-3.681583	-9.119244	-10.528305	-1.481219	-1.468398
+2	0.691700	149.591797	149.531464	0.500000	0.060329	-2.493165	-3.521931	-1.497294	-1.492391
+3	20.567300	313.212372	333.610962	0.000000	-20.398582	-34.133106	-19.487499	-1.137449	-1.254931
+4	5.985700	180.075516	181.003723	0.500000	-0.928212	-25.940891	-27.779720	-1.045174	-0.975398
+5	4.146100	133.932419	133.286285	0.250000	0.646132	-2.747568	-16.488842	-1.504948	-1.272311
+6	0.823900	152.003357	144.304459	0.500000	7.698898	-5.675218	-13.171251	-1.493887	-1.426408
+7	3.390100	272.862488	275.314941	0.750000	-2.452448	-14.392658	-11.494240	-1.490495	-1.481624
+8	1.961600	194.399887	195.839783	0.500000	-1.439898	-10.206017	-17.528584	-1.487728	-1.463580
+9	1.288000	228.076996	227.872879	0.500000	0.204132	-10.703759	-7.913522	-1.315540	-1.339544
+10	0.650700	204.405396	203.913269	0.500000	0.492113	-3.636736	-4.597524	-1.466760	-1.454794
+11	2.308200	195.337738	189.995117	0.250000	5.342628	-7.416625	-14.333553	-1.400610	-1.376187
+12	5.499200	154.834564	158.802521	0.250000	-3.967953	-3.897851	-11.239853	-1.364159	-1.311306
+13	0.756000	259.355530	254.097443	0.500000	5.258079	-7.023975	-19.086285	-1.449431	-1.400219
+14	2.352100	130.993896	127.536362	0.750000	3.457546	-4.997186	-21.992601	-1.406023	-1.242687
+15	0.180000	131.176529	124.000069	1.000000	7.176453	-8.710793	-13.978321	-1.412210	-1.404991
+16	1.274000	196.846024	187.071411	0.750000	9.774600	-12.534443	-26.012093	-1.344982	-1.117487
+17	6.176900	191.607056	191.562729	0.500000	0.044333	-10.601497	-29.720375	-1.466693	-1.364162
+18	5.070100	198.427231	201.838989	0.250000	-3.411757	-9.226418	-22.800217	-1.338334	-1.156886
+19	5.788500	268.204071	250.979340	0.250000	17.224731	-18.484901	-23.240341	-1.384044	-1.301611
+20	0.233000	242.273788	238.466751	0.750000	3.807028	-20.926521	-12.193876	-1.491639	-1.489582
+21	5.571800	275.740540	281.214386	0.000000	-5.473867	-13.153324	-10.487625	-1.516008	-1.504116
+22	0.274300	250.418457	248.588120	1.000000	1.830339	-18.256269	-19.718525	-1.431667	-1.450078
+23	2.202900	197.423126	199.281433	0.250000	-1.858329	-2.084925	-33.007423	-1.082769	-0.925363
+24	1.711000	208.393311	208.699646	0.250000	-0.306343	-7.256601	-12.477598	-1.431537	-1.454406
+25	3.290600	183.803299	177.368347	0.750000	6.434957	-2.531829	-24.246958	-1.491329	-1.150516
+26	1.949100	74.665436	75.803726	0.750000	-1.138292	-0.972318	-18.477615	-1.456773	-1.361762
+27	1.600100	225.689697	222.954987	0.500000	2.734701	-7.533436	-16.763575	-1.426409	-1.393222
+28	1.309100	267.473022	268.279205	0.250000	-0.806189	-4.401894	-10.071655	-1.486968	-1.476720
+29	9.656100	187.532333	195.525970	0.250000	-7.993630	-25.138973	-39.748283	-1.061608	-0.719969
+30	0.882000	69.001389	69.343903	0.000000	-0.342515	-0.107893	-3.169387	-1.455371	-1.451766
+31	3.945200	189.449280	190.954437	0.500000	-1.505159	-9.984974	-12.326902	-1.216869	-1.259565
+32	2.480100	138.519302	140.329102	0.500000	-1.809792	-0.447631	-6.113644	-1.516793	-1.473397
+33	5.273600	193.669785	197.381561	0.500000	-3.711760	-12.752033	-12.933497	-1.492594	-1.471259
+34	7.568800	190.045670	197.447067	0.000000	-7.401400	-7.813534	-15.990356	-1.415851	-1.374830
+35	1.519200	71.788399	72.882179	0.250000	-1.093782	-0.105676	-4.086022	-1.510919	-1.476653
+36	1.658900	256.282043	257.082397	0.500000	-0.800352	-10.467192	-36.521240	-1.058082	-0.882069
+37	3.578800	182.000824	173.072174	0.500000	8.928624	-2.823293	-25.433561	-1.524252	-1.236481
+38	0.112400	291.507874	288.209808	1.000000	3.298050	-25.402489	-20.753325	-1.391902	-1.411452
+39	3.656200	259.540802	257.704681	0.250000	1.836101	-6.460437	-20.301926	-1.391401	-1.353859
+40	1.007900	231.489502	231.391876	0.750000	0.097624	-3.378751	-6.868892	-1.370812	-1.367773
+41	3.401400	204.376801	202.477402	0.500000	1.899396	-11.274258	-26.896902	-1.469246	-1.414630
+42	0.954400	197.542114	197.384476	0.500000	0.157648	-3.712617	-3.470393	-1.465293	-1.469601
+43	15.183900	189.290619	196.775085	0.250000	-7.484462	-14.321866	-17.551058	-1.378305	-1.408052
+44	0.655500	189.085999	176.555145	0.750000	12.530856	-11.156734	-38.870613	-1.482217	-1.032483
+45	1.572700	212.207520	213.341476	0.250000	-1.133957	-18.534695	-14.902348	-1.326632	-1.389876
+46	3.302000	225.889740	205.550659	0.750000	20.339077	-21.117550	-13.243150	-1.485412	-1.423065
+47	3.403500	303.781097	306.445312	0.250000	-2.664223	-21.196959	-10.945988	-1.458314	-1.465896
+48	5.260200	312.443542	312.558563	0.500000	-0.115005	-16.047356	-15.250660	-1.508007	-1.520806
+49	4.021400	262.055664	265.434601	0.500000	-3.378918	-2.602478	-11.182851	-1.458322	-1.449565
+50	0.000200	195.304718	177.376450	1.000000	17.928257	-17.272411	-42.425480	-1.288576	-1.098646
+
+Training runtime: 1030.70 seconds (17.18 minutes)
+Peak reserved VRAM: 94.07 GiB
+Saved DPO-trained LoRA adapter to /kaggle/working/nemotron-lora-dpo-v1
+
+Note: Environment variable`HF_TOKEN` is set and is the current active token independently from the token you've just configured.
+Processing Files (2 / 2): 100%
+ 3.55GB / 3.55GB,  142MB/s  
+New Data Upload: 100%
+ 3.53GB / 3.53GB,  142MB/s  
+Upload to Hugging Face succeeded
+
+Uploading Model https://api.kaggle.com/models/rohitraje0493/nemotron-3-nano/transformers/lora-dpo ...
+Warning: Looks like you're using an outdated `kagglehub` version (installed: 1.0.0), please consider upgrading to the latest version (1.0.2)Starting upload for file /kaggle/working/nemotron-lora-dpo-v1/special_tokens_map.json
+Uploading: 100%|██████████| 566/566 [00:00<00:00, 1.40kB/s]
+Upload successful: /kaggle/working/nemotron-lora-dpo-v1/special_tokens_map.json (566B)
+Starting upload for file /kaggle/working/nemotron-lora-dpo-v1/README.md
+
+Uploading: 100%|██████████| 5.26k/5.26k [00:00<00:00, 12.9kB/s]
+Upload successful: /kaggle/working/nemotron-lora-dpo-v1/README.md (5KB)
+Starting upload for file /kaggle/working/nemotron-lora-dpo-v1/adapter_config.json
+
+Uploading: 100%|██████████| 1.31k/1.31k [00:00<00:00, 3.28kB/s]
+Upload successful: /kaggle/working/nemotron-lora-dpo-v1/adapter_config.json (1KB)
+Starting upload for file /kaggle/working/nemotron-lora-dpo-v1/tokenizer_config.json
+
+Uploading: 100%|██████████| 177k/177k [00:00<00:00, 449kB/s]
+Upload successful: /kaggle/working/nemotron-lora-dpo-v1/tokenizer_config.json (173KB)
+Starting upload for file /kaggle/working/nemotron-lora-dpo-v1/adapter_model.safetensors
+
+Uploading: 100%|██████████| 3.54G/3.54G [00:54<00:00, 65.1MB/s]
+Upload successful: /kaggle/working/nemotron-lora-dpo-v1/adapter_model.safetensors (3GB)
+Starting upload for file /kaggle/working/nemotron-lora-dpo-v1/chat_template.jinja
+
+Uploading: 100%|██████████| 10.5k/10.5k [00:00<00:00, 26.3kB/s]
+Upload successful: /kaggle/working/nemotron-lora-dpo-v1/chat_template.jinja (10KB)
+Starting upload for file /kaggle/working/nemotron-lora-dpo-v1/tokenizer.json
+
+Uploading: 100%|██████████| 17.1M/17.1M [00:00<00:00, 26.6MB/s]
+Upload successful: /kaggle/working/nemotron-lora-dpo-v1/tokenizer.json (16MB)
+
+Your model instance version has been created.
+Files are being processed...
+See at: https://api.kaggle.com/models/rohitraje0493/nemotron-3-nano/transformers/lora-dpo
+Uploading Dataset https://api.kaggle.com/datasets/rohitraje0493/nemotron-dpo ...
+More than 50 files detected, creating a zip archive...
+Starting upload for file /tmp/tmprwle7h6x/archive.zip
+Uploading: 100%|██████████| 17.8G/17.8G [03:35<00:00, 82.7MB/s]
+Upload successful: /tmp/tmprwle7h6x/archive.zip (17GB)
+
+Your dataset version has been created.
+Files are being processed...
+See at: https://api.kaggle.com/datasets/rohitraje0493/nemotron-dpo
+Upload to Kaggle succeeded

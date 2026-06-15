@@ -182,14 +182,14 @@ PER_DEVICE_TRAIN_BATCH_SIZE = int(
 )
 PER_DEVICE_EVAL_BATCH_SIZE = int(os.environ.get("PER_DEVICE_EVAL_BATCH_SIZE", "1"))
 GRADIENT_ACCUMULATION_STEPS = int(
-    os.environ.get("GRADIENT_ACCUMULATION_STEPS", "16")
+    os.environ.get("GRADIENT_ACCUMULATION_STEPS", "4")
 )
-NUM_TRAIN_EPOCHS = float(os.environ.get("NUM_TRAIN_EPOCHS", "3"))
+NUM_TRAIN_EPOCHS = float(os.environ.get("NUM_TRAIN_EPOCHS", "2"))
 MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))
-LEARNING_RATE = float(os.environ.get("LEARNING_RATE", "2e-4"))
+LEARNING_RATE = float(os.environ.get("LEARNING_RATE", "1e-6"))
 WARMUP_RATIO = float(os.environ.get("WARMUP_RATIO", "0.03"))
-LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "10"))
-SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "50"))
+LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "1"))
+SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "5"))
 EVAL_STEPS = int(os.environ.get("EVAL_STEPS", str(SAVE_STEPS)))
 SAVE_TOTAL_LIMIT = int(os.environ.get("SAVE_TOTAL_LIMIT", "2"))
 LORA_R = int(os.environ.get("LORA_R", "32"))
@@ -756,7 +756,7 @@ dpo_trainer = DPOTrainer(
         beta=DPO_BETA,
         loss_type=[DPO_LOSS_TYPE],
         precompute_ref_log_probs=PRECOMPUTE_REF_LOG_PROBS,
-        max_grad_norm=1e9,
+        max_grad_norm=0.3,
     ),
 )
 
@@ -863,6 +863,7 @@ if PUSH_TO_KAGGLE:
             license_name="Apache 2.0",
         )
 
+        (WORKING_DIR / "state.db").unlink(missing_ok=True)
         kagglehub.dataset_upload(
             handle=KAGGLE_DATASET_REPO,
             local_dataset_dir=WORKING_DIR,

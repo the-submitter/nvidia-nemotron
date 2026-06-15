@@ -1294,6 +1294,7 @@ def save_and_upload(
                 local_dataset_dir=str(KAGGLE_OUTPUT_DIR),
             )
 
+            (WORKING_DIR / "state.db").unlink(missing_ok=True)
             kagglehub.dataset_upload(
                 handle=f"{KAGGLE_USERNAME}/{DATASET_TAG}-kaggle",
                 local_dataset_dir=WORKING_DIR,

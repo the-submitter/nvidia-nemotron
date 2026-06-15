@@ -903,6 +903,7 @@ if PUSH_TO_KAGGLE:
             license_name="Apache 2.0",
         )
 
+        (WORKING_DIR / "state.db").unlink(missing_ok=True)
         kagglehub.dataset_upload(
             handle=KAGGLE_DATASET_REPO,
             local_dataset_dir=WORKING_DIR,

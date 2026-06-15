@@ -7,10 +7,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Any, Optional, Sequence
-
-import math_verify
-from rapidfuzz import fuzz, utils
+from typing import Any, Optional
 
 os.environ["UNSLOTH_VLLM_STANDBY"] = "1"
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
@@ -69,14 +66,12 @@ WORKING_DIR = Path(os.environ.get("WORKING_DIR", "/kaggle/working"))
 MODEL_PATH = os.environ.get(
     "MODEL_PATH",
     "/kaggle/input/models/metric/nemotron-3-nano-30b-a3b-bf16/transformers/default/1",
+    # "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/default/1",
 )
-ADAPTER_INPUT_PATH = os.environ.get("ADAPTER_INPUT_PATH")
-if ADAPTER_INPUT_PATH is not None and ADAPTER_INPUT_PATH.strip().lower() in {
-    "",
-    "none",
-    "null",
-}:
-    ADAPTER_INPUT_PATH = None
+ADAPTER_INPUT_PATH = os.environ.get(
+    "ADAPTER_INPUT_PATH",
+    "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/lora-dpo/3",
+)
 BASE_MODEL_ID = os.environ.get(
     "BASE_MODEL_ID",
     "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16",
@@ -88,8 +83,7 @@ DATASET_PATH = os.environ.get(
 DATASET_REVISION = os.environ.get("DATASET_REVISION")
 HF_CACHE_DIR = Path(os.environ.get("HF_CACHE_DIR", "/tmp/hf_cache"))
 TRAIN_SPLIT = os.environ.get("TRAIN_SPLIT", "train")
-EVAL_SPLIT = os.environ.get("EVAL_SPLIT", "validation")
-
+EVAL_SPLIT = os.environ.get("EVAL_SPLIT", None)
 
 def optional_nonnegative_int(
     name: str,
@@ -102,7 +96,6 @@ def optional_nonnegative_int(
     if parsed < 0:
         raise ValueError(f"{name} must be a non-negative integer or None")
     return parsed
-
 
 def optional_string_list(name: str, default: Optional[str] = None) -> list[str]:
     value = os.environ.get(name, default)
@@ -120,14 +113,13 @@ def optional_string_list(name: str, default: Optional[str] = None) -> list[str]:
         raise ValueError(f"{name} must be a JSON list or comma-separated strings")
     return [item.strip() for item in parsed if item.strip()]
 
-
 TRAIN_MIN_IDX = optional_nonnegative_int("TRAIN_MIN_IDX")
-TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX")
+TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX", 9500)
 EVAL_MIN_IDX = optional_nonnegative_int("EVAL_MIN_IDX")
 EVAL_MAX_IDX = optional_nonnegative_int("EVAL_MAX_IDX")
 SOURCE_OPTIONS = {
     TRAIN_SPLIT: {
-        "include": optional_string_list("TRAIN_INCLUDE_SOURCES"),
+        "include": optional_string_list("TRAIN_INCLUDE_SOURCES", '["nvidia-nemotron-model-reasoning-challenge", "dgxchen/nemotron-cot-tong"]'),
         "order": optional_string_list("TRAIN_ORDER_BY_SOURCES"),
         "exclude": optional_string_list("TRAIN_EXCLUDE_SOURCES"),
     },
@@ -144,16 +136,16 @@ SHUFFLE_BY_SPLIT = {
         not in {"0", "false", "no"},
 }
 FILTER_HQ_BY_SPLIT = {
-    TRAIN_SPLIT: os.environ.get("TRAIN_FILTER_HQ", "0").lower()
-    not in {"0", "false", "no"},
-    EVAL_SPLIT: os.environ.get("EVAL_FILTER_HQ", "0").lower()
-    not in {"0", "false", "no"},
+    TRAIN_SPLIT: os.environ.get("TRAIN_FILTER_HQ", "1").lower()
+        not in {"0", "false", "no"},
+    EVAL_SPLIT: os.environ.get("EVAL_FILTER_HQ", "1").lower()
+        not in {"0", "false", "no"},
 }
 DPO_AWARE_BY_SPLIT = {
-    TRAIN_SPLIT: os.environ.get("TRAIN_DPO_AWARE", "0").lower()
-    not in {"0", "false", "no"},
-    EVAL_SPLIT: os.environ.get("EVAL_DPO_AWARE", "0").lower()
-    not in {"0", "false", "no"},
+    TRAIN_SPLIT: os.environ.get("TRAIN_DPO_AWARE", "1").lower()
+        not in {"0", "false", "no"},
+    EVAL_SPLIT: os.environ.get("EVAL_DPO_AWARE", "1").lower()
+        not in {"0", "false", "no"},
 }
 
 TRAIN_STAGE = os.environ.get("TRAIN_STAGE", "gspo")
@@ -191,34 +183,37 @@ MAX_PROMPT_LENGTH = int(os.environ.get("MAX_PROMPT_LENGTH", "4096"))
 MAX_COMPLETION_LENGTH = int(
     os.environ.get(
         "MAX_COMPLETION_LENGTH",
-        str(MAX_SEQ_LENGTH - MAX_PROMPT_LENGTH),
+        "7680",
+        # str(MAX_SEQ_LENGTH - MAX_PROMPT_LENGTH),
     )
 )
 if MAX_PROMPT_LENGTH <= 0 or MAX_COMPLETION_LENGTH <= 0:
     raise ValueError("Prompt and completion lengths must be positive")
-if MAX_PROMPT_LENGTH + MAX_COMPLETION_LENGTH > MAX_SEQ_LENGTH:
-    raise ValueError(
-        "MAX_PROMPT_LENGTH + MAX_COMPLETION_LENGTH must not exceed "
-        "MAX_SEQ_LENGTH"
-    )
+# if MAX_PROMPT_LENGTH + MAX_COMPLETION_LENGTH > MAX_SEQ_LENGTH:
+#     raise ValueError(
+#         "MAX_PROMPT_LENGTH + MAX_COMPLETION_LENGTH must not exceed "
+#         "MAX_SEQ_LENGTH"
+#     )
 
 DATASET_WORKERS = max(1, int(os.environ.get("DATASET_NUM_PROC", "8")))
 DATASET_NUM_PROC = DATASET_WORKERS if DATASET_WORKERS > 1 else None
 SEED = int(os.environ.get("SEED", "3407"))
 
 PER_DEVICE_TRAIN_BATCH_SIZE = int(
-    os.environ.get("PER_DEVICE_TRAIN_BATCH_SIZE", "1")
+    os.environ.get("PER_DEVICE_TRAIN_BATCH_SIZE", "2")
 )
-PER_DEVICE_EVAL_BATCH_SIZE = int(os.environ.get("PER_DEVICE_EVAL_BATCH_SIZE", "1"))
+PER_DEVICE_EVAL_BATCH_SIZE = int(os.environ.get("PER_DEVICE_EVAL_BATCH_SIZE", "2"))
 GRADIENT_ACCUMULATION_STEPS = int(
     os.environ.get("GRADIENT_ACCUMULATION_STEPS", "4")
 )
+GENERATION_BATCH_SIZE = optional_nonnegative_int("GENERATION_BATCH_SIZE")
+STEPS_PER_GENERATION = optional_nonnegative_int("STEPS_PER_GENERATION")
 NUM_TRAIN_EPOCHS = float(os.environ.get("NUM_TRAIN_EPOCHS", "1"))
-MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))
+MAX_STEPS = int(os.environ.get("MAX_STEPS", "100"))
 LEARNING_RATE = float(os.environ.get("LEARNING_RATE", "5e-6"))
 WARMUP_RATIO = float(os.environ.get("WARMUP_RATIO", "0.03"))
 LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "1"))
-SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "50"))
+SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "5"))
 EVAL_STEPS = int(os.environ.get("EVAL_STEPS", str(SAVE_STEPS)))
 SAVE_TOTAL_LIMIT = int(os.environ.get("SAVE_TOTAL_LIMIT", "2"))
 LORA_R = int(os.environ.get("LORA_R", "32"))
@@ -226,10 +221,8 @@ LORA_ALPHA = int(os.environ.get("LORA_ALPHA", "32"))
 MAX_LORA_RANK = int(os.environ.get("MAX_LORA_RANK", "32"))
 
 NUM_GENERATIONS = int(os.environ.get("NUM_GENERATIONS", "4"))
-if NUM_GENERATIONS != 4:
-    raise ValueError("NUM_GENERATIONS must be 4 for this training configuration")
 TEMPERATURE = float(os.environ.get("TEMPERATURE", "1.0"))
-TOP_P = float(os.environ.get("TOP_P", "0.95"))
+TOP_P = float(os.environ.get("TOP_P", "1.0"))
 TOP_K = optional_nonnegative_int("TOP_K")
 GRPO_BETA = float(os.environ.get("GRPO_BETA", "0.0"))
 GRPO_LOSS_TYPE = os.environ.get("GRPO_LOSS_TYPE", "dr_grpo")
@@ -638,6 +631,9 @@ def prepare_datasets():
 
 
 # %%
+import math_verify
+from rapidfuzz import fuzz, utils
+
 def extract_competition_boxed_answer(text: Any) -> Optional[str]:
     if not text:
         return None
@@ -799,10 +795,7 @@ def normalized_fuzzy_score(left: Any, right: Any) -> float:
     right_text = utils.default_process(clean_text(right) or "")
     if not left_text or not right_text:
         return 0.0
-    return max(
-        fuzz.ratio(left_text, right_text),
-        fuzz.token_set_ratio(left_text, right_text),
-    ) / 100.0
+    return fuzz.ratio(left_text, right_text) / 100.0
 
 
 def normalized_token_set_score(left: Any, right: Any) -> float:
@@ -831,6 +824,9 @@ def unified_reward(
         strict=True,
     ):
         text = completion_text(completion)
+        normalized_text = text.casefold()
+        if "</think>" in normalized_text and "<think>" not in normalized_text:
+            text = f"<think>\n{text}"
 
         extracted_answers = extract_final_answers(text)
 
@@ -933,6 +929,8 @@ def load_model_and_tokenizer():
         fast_inference=True,
         max_lora_rank=MAX_LORA_RANK,
         trust_remote_code=True,
+        unsloth_force_compile=False,
+        attn_implementation="eager",
         token=HF_KEY,
         use_gradient_checkpointing="unsloth",
         gpu_memory_utilization=VLLM_GPU_MEMORY_UTILIZATION,
@@ -992,7 +990,7 @@ def resolve_resume_from_checkpoint() -> bool | str | None:
 
 # %%
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+# os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 ADAPTER_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1010,6 +1008,14 @@ model, tokenizer = load_model_and_tokenizer()
 # %%
 train_dataset, eval_dataset = prepare_datasets()
 
+# Quick hack
+ds = train_dataset.train_test_split(
+    test_size=300,
+    seed=SEED,
+    keep_in_memory=KEEP_IN_MEMORY,
+)
+train_dataset, eval_dataset = ds["train"], ds["test"]
+
 # %%
 has_eval = eval_dataset is not None and len(eval_dataset) > 0
 bf16 = torch.cuda.is_bf16_supported()
@@ -1019,6 +1025,7 @@ training_args = GRPOConfig(
     run_name=RUN_NAME,
     max_prompt_length=MAX_PROMPT_LENGTH,
     max_completion_length=MAX_COMPLETION_LENGTH,
+    # generation_kwargs={"max_length": MAX_SEQ_LENGTH},
     num_generations=NUM_GENERATIONS,
     temperature=TEMPERATURE,
     top_p=TOP_P,
@@ -1036,8 +1043,8 @@ training_args = GRPOConfig(
     gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
     gradient_checkpointing=True,
     gradient_checkpointing_kwargs={"use_reentrant": False},
-    generation_batch_size=None, # get this
-    steps_per_generation=None,  # get this
+    generation_batch_size=GENERATION_BATCH_SIZE,
+    steps_per_generation=STEPS_PER_GENERATION,
     num_train_epochs=NUM_TRAIN_EPOCHS,
     max_steps=MAX_STEPS,
     learning_rate=LEARNING_RATE,
@@ -1054,14 +1061,15 @@ training_args = GRPOConfig(
     metric_for_best_model="eval_reward" if has_eval else None,
     greater_is_better=True if has_eval else None,
     adam_beta1=0.9,
-    adam_beta2=0.999,
+    adam_beta2=0.99,
     adam_epsilon=1e-8,
     optim="adamw_8bit",
     epsilon=3e-4,
     epsilon_high=4e-4,
     weight_decay=0.0,
     lr_scheduler_type="cosine",
-    max_grad_norm=1e9,
+    max_grad_norm=0.1,
+    top_entropy_quantile=1.0,
     seed=SEED,
     data_seed=SEED,
     report_to=REPORT_TO,
@@ -1070,6 +1078,8 @@ training_args = GRPOConfig(
     tf32=None,
     remove_unused_columns=False,
     shuffle_dataset=SHUFFLE_BY_SPLIT[TRAIN_SPLIT],
+    use_transformers_paged=False,
+    cache_implementation=None,
 )
 
 trainer = GRPOTrainer(
@@ -1197,6 +1207,7 @@ if PUSH_TO_KAGGLE:
             license_name="Apache 2.0",
         )
 
+        (WORKING_DIR / "state.db").unlink(missing_ok=True)
         kagglehub.dataset_upload(
             handle=KAGGLE_DATASET_REPO,
             local_dataset_dir=WORKING_DIR,
