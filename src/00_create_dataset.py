@@ -179,8 +179,9 @@ def is_high_quality_example(example: dict[str, Any]) -> bool:
     answer_type = clean_text(example.get("answer_type"))
     if answer_type is not None and answer_type.lower() in HQ_ANSWER_TYPES:
         return True
-    final_answer = clean_text(example.get("final_answer"))
-    return final_answer is not None and final_answer.isalnum()
+    return False
+    # final_answer = clean_text(example.get("final_answer"))
+    # return final_answer is not None and final_answer.isalnum()
 
 
 def contains_url(value: Any) -> bool:

@@ -135,29 +135,29 @@ FILTER_HQ_BY_SPLIT = {
         not in {"0", "false", "no"},
 }
 
-LORA_STAGE = os.environ.get("LORA_STAGE", "sft")
-LORA_VERSION = os.environ.get("LORA_VERSION", "v2")
-RUN_NAME = os.environ.get("RUN_NAME", f"nemotron-{LORA_STAGE}-{LORA_VERSION}")
+TRAIN_STAGE = os.environ.get("TRAIN_STAGE", "sft")
+TRAIN_VERSION = os.environ.get("TRAIN_VERSION", "v2")
+RUN_NAME = os.environ.get("RUN_NAME", f"nemotron-{TRAIN_STAGE}-{TRAIN_VERSION}")
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", str(WORKING_DIR / RUN_NAME)))
 ADAPTER_OUTPUT_DIR = Path(
     os.environ.get(
         "ADAPTER_OUTPUT_DIR",
-        str(WORKING_DIR / f"nemotron-lora-{LORA_STAGE}-{LORA_VERSION}"),
+        str(WORKING_DIR / f"nemotron-lora-{TRAIN_STAGE}-{TRAIN_VERSION}"),
     )
 )
 ADAPTER_INPUT_PATH = os.environ.get("ADAPTER_INPUT_PATH")
 HF_USERNAME = os.environ.get("HF_USERNAME", "the-submitter")
 HF_ADAPTER_REPO = os.environ.get(
     "HF_ADAPTER_REPO",
-    f"{HF_USERNAME}/nemotron-lora-{LORA_STAGE}-{LORA_VERSION}",
+    f"{HF_USERNAME}/nemotron-lora-{TRAIN_STAGE}-{TRAIN_VERSION}",
 )
 KAGGLE_ADAPTER_REPO = os.environ.get(
     "KAGGLE_ADAPTER_REPO",
-    f"{KAGGLE_USERNAME}/nemotron-3-nano/transformers/lora-{LORA_STAGE}",
+    f"{KAGGLE_USERNAME}/nemotron-3-nano/transformers/lora-{TRAIN_STAGE}",
 )
 KAGGLE_DATASET_REPO = os.environ.get(
     "KAGGLE_DATASET_REPO",
-    f"{KAGGLE_USERNAME}/nemotron-{LORA_STAGE}",
+    f"{KAGGLE_USERNAME}/nemotron-{TRAIN_STAGE}",
 )
 
 MAX_SEQ_LENGTH = int(os.environ.get("MAX_SEQ_LENGTH", "8192"))
@@ -175,7 +175,7 @@ GRADIENT_ACCUMULATION_STEPS = int(
 NUM_TRAIN_EPOCHS = float(os.environ.get("NUM_TRAIN_EPOCHS", "1"))
 MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))
 LEARNING_RATE = float(os.environ.get("LEARNING_RATE", "2e-4"))
-WARMUP_STEPS = int(os.environ.get("WARMUP_STEPS", "10"))
+WARMUP_RATIO = float(os.environ.get("WARMUP_RATIO", "0.03"))
 LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "10"))
 SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "10"))
 EVAL_STEPS = int(os.environ.get("EVAL_STEPS", str(SAVE_STEPS)))
@@ -249,8 +249,9 @@ def is_high_quality_example(example: dict[str, Any]) -> bool:
     answer_type = clean_text(example.get("answer_type"))
     if answer_type is not None and answer_type.lower() in HQ_ANSWER_TYPES:
         return True
-    final_answer = clean_text(example.get("final_answer"))
-    return final_answer is not None and final_answer.isalnum()
+    return False
+    # final_answer = clean_text(example.get("final_answer"))
+    # return final_answer is not None and final_answer.isalnum()
 
 
 def build_user_content(prompt: Any) -> str:
@@ -463,12 +464,6 @@ def prepare_split(
         desc=f"{split_name}: keep non-empty responses",
         keep_in_memory=KEEP_IN_MEMORY,
     )
-    if not len(dataset):
-        if allow_empty:
-            print(f"{split_name}: no trainable examples after filtering")
-            return None
-        raise ValueError(f"{split_name} has no examples with non-empty responses")
-
     if FILTER_HQ_BY_SPLIT.get(split_name):
         before_hq = len(dataset)
         dataset = dataset.filter(
@@ -477,17 +472,15 @@ def prepare_split(
             desc=f"{split_name}: keep high-quality examples",
             keep_in_memory=KEEP_IN_MEMORY,
         )
-        if not len(dataset):
-            if allow_empty:
-                print(f"{split_name}: no high-quality trainable examples")
-                return None
-            raise ValueError(
-                f"{split_name} has no high-quality trainable examples"
-            )
         print(
             f"{split_name}: HQ filter retained "
             f"{len(dataset):,}/{before_hq:,} examples"
         )
+    if not len(dataset):
+        if allow_empty:
+            print(f"{split_name}: no trainable examples after filtering")
+            return None
+        raise ValueError(f"{split_name} has no trainable examples after filtering")
 
     from datasets import Features, List, Value
 
@@ -763,7 +756,7 @@ trainer = SFTTrainer(
         num_train_epochs=NUM_TRAIN_EPOCHS,
         max_steps=MAX_STEPS,
         learning_rate=LEARNING_RATE,
-        warmup_steps=WARMUP_STEPS,
+        warmup_ratio=WARMUP_RATIO,
         logging_steps=LOGGING_STEPS,
         logging_first_step=True,
         save_strategy="steps",
@@ -906,14 +899,14 @@ if PUSH_TO_KAGGLE:
         kagglehub.model_upload(
             handle=KAGGLE_ADAPTER_REPO,
             local_model_dir=ADAPTER_OUTPUT_DIR,
-            version_notes=f"LoRA {LORA_STAGE} for unsloth/Nemotron-3-Nano-30B-A3B",
+            version_notes=f"LoRA {TRAIN_STAGE} for unsloth/Nemotron-3-Nano-30B-A3B",
             license_name="Apache 2.0",
         )
 
         kagglehub.dataset_upload(
             handle=KAGGLE_DATASET_REPO,
             local_dataset_dir=WORKING_DIR,
-            version_notes=f"nemotron {LORA_STAGE}",
+            version_notes=f"nemotron {TRAIN_STAGE}",
         )
     except Exception as e:
         print(f"Upload to Kaggle failed: {e}")

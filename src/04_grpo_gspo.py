@@ -2,17 +2,26 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
+
+import math_verify
+from rapidfuzz import fuzz, utils
+
+os.environ["UNSLOTH_VLLM_STANDBY"] = "1"
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("TRANSFORMERS_NO_FLAX", "1")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
 # %%
 # User secrets
 # try:
 #     from kaggle_secrets import UserSecretsClient  # type: ignore
-
+#
 #     user_secrets = UserSecretsClient()
 #     KAGGLE_KEY = user_secrets.get_secret("KAGGLE_KEY")
 #     KAGGLE_USERNAME = user_secrets.get_secret("KAGGLE_USERNAME")
@@ -23,15 +32,6 @@ from typing import Any, Optional
 #     KAGGLE_USERNAME = os.environ.get("KAGGLE_USERNAME")
 #     HF_KEY = os.environ.get("HF_KEY") or os.environ.get("HF_TOKEN")
 #     WANDB_KEY = os.environ.get("WANDB_KEY") or os.environ.get("WANDB_API_KEY")
-
-# if KAGGLE_KEY:
-#     os.environ["KAGGLE_KEY"] = KAGGLE_KEY
-# if KAGGLE_USERNAME:
-#     os.environ["KAGGLE_USERNAME"] = KAGGLE_USERNAME
-# if HF_KEY:
-#     os.environ["HF_TOKEN"] = HF_KEY
-# if WANDB_KEY:
-#     os.environ["WANDB_API_KEY"] = WANDB_KEY
 
 HF_KEY = WANDB_KEY = KAGGLE_KEY = KAGGLE_USERNAME = None
 
@@ -49,25 +49,37 @@ wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
 #     unsloth_zoo \
 #     --no-index --find-links={wheels_dir}
 # !uv pip install --no-deps "torchcodec==0.10.0+cu128" --no-index --find-links={wheels_dir}
-# !uv pip install mamba_ssm causal_conv1d --no-index --find-links={wheels_dir}
-# !uv pip install --no-deps --upgrade "torchao>=0.16.0" \
+# !uv pip install \
+#     mamba_ssm \
+#     causal_conv1d \
 #     --no-index --find-links={wheels_dir}
-# # !uv pip install vllm --no-index --find-links={wheels_dir}
-# # !uv pip install "protobuf<6.0.0" --no-index --find-links={wheels_dir}
+# !uv pip install --no-deps --upgrade \
+#     "torchao>=0.16.0" \
+#     --no-index --find-links={wheels_dir}
+# !uv pip install \
+#     "math-verify[antlr4_11_0]" \
+#     rapidfuzz \
+#     "antlr4-python3-runtime==4.11.0" \
+#     --no-index --find-links={wheels_dir}
+# !uv pip install vllm --no-index --find-links={wheels_dir}
+# !uv pip install "protobuf<6.0.0" --no-index --find-links={wheels_dir}
 
 # %%
 WORKING_DIR = Path(os.environ.get("WORKING_DIR", "/kaggle/working"))
 MODEL_PATH = os.environ.get(
     "MODEL_PATH",
     "/kaggle/input/models/metric/nemotron-3-nano-30b-a3b-bf16/transformers/default/1",
-    # "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/default/1",
 )
-ADAPTER_INPUT_PATH = os.environ.get(
-    "ADAPTER_INPUT_PATH",
-    "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/lora-sft/7",
-)
+ADAPTER_INPUT_PATH = os.environ.get("ADAPTER_INPUT_PATH")
+if ADAPTER_INPUT_PATH is not None and ADAPTER_INPUT_PATH.strip().lower() in {
+    "",
+    "none",
+    "null",
+}:
+    ADAPTER_INPUT_PATH = None
 BASE_MODEL_ID = os.environ.get(
-    "BASE_MODEL_ID", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16",
+    "BASE_MODEL_ID",
+    "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16",
 )
 DATASET_PATH = os.environ.get(
     "DATASET_PATH",
@@ -76,9 +88,13 @@ DATASET_PATH = os.environ.get(
 DATASET_REVISION = os.environ.get("DATASET_REVISION")
 HF_CACHE_DIR = Path(os.environ.get("HF_CACHE_DIR", "/tmp/hf_cache"))
 TRAIN_SPLIT = os.environ.get("TRAIN_SPLIT", "train")
-EVAL_SPLIT = os.environ.get("EVAL_SPLIT", None)
+EVAL_SPLIT = os.environ.get("EVAL_SPLIT", "validation")
 
-def optional_nonnegative_int(name: str, default: Optional[int] = None) -> Optional[int]:
+
+def optional_nonnegative_int(
+    name: str,
+    default: Optional[int] = None,
+) -> Optional[int]:
     value = os.environ.get(name, str(default))
     if value is None or value.strip().lower() in {"", "none", "null"}:
         return None
@@ -86,6 +102,7 @@ def optional_nonnegative_int(name: str, default: Optional[int] = None) -> Option
     if parsed < 0:
         raise ValueError(f"{name} must be a non-negative integer or None")
     return parsed
+
 
 def optional_string_list(name: str, default: Optional[str] = None) -> list[str]:
     value = os.environ.get(name, default)
@@ -103,13 +120,14 @@ def optional_string_list(name: str, default: Optional[str] = None) -> list[str]:
         raise ValueError(f"{name} must be a JSON list or comma-separated strings")
     return [item.strip() for item in parsed if item.strip()]
 
+
 TRAIN_MIN_IDX = optional_nonnegative_int("TRAIN_MIN_IDX")
-TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX", 100)
+TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX")
 EVAL_MIN_IDX = optional_nonnegative_int("EVAL_MIN_IDX")
 EVAL_MAX_IDX = optional_nonnegative_int("EVAL_MAX_IDX")
 SOURCE_OPTIONS = {
     TRAIN_SPLIT: {
-        "include": optional_string_list("TRAIN_INCLUDE_SOURCES", '["nvidia-nemotron-model-reasoning-challenge", "dgxchen/nemotron-cot-tong"]'),
+        "include": optional_string_list("TRAIN_INCLUDE_SOURCES"),
         "order": optional_string_list("TRAIN_ORDER_BY_SOURCES"),
         "exclude": optional_string_list("TRAIN_EXCLUDE_SOURCES"),
     },
@@ -119,31 +137,39 @@ SOURCE_OPTIONS = {
         "exclude": optional_string_list("EVAL_EXCLUDE_SOURCES"),
     },
 }
-TRAIN_SHUFFLE = os.environ.get("TRAIN_SHUFFLE", "0").lower() not in {
-    "0",
-    "false",
-    "no",
-}
-EVAL_SHUFFLE = os.environ.get("EVAL_SHUFFLE", "0").lower() not in {
-    "0",
-    "false",
-    "no",
+SHUFFLE_BY_SPLIT = {
+    TRAIN_SPLIT: os.environ.get("TRAIN_SHUFFLE", "0").lower()
+        not in {"0", "false", "no"},
+    EVAL_SPLIT: os.environ.get("EVAL_SHUFFLE", "0").lower()
+        not in {"0", "false", "no"},
 }
 FILTER_HQ_BY_SPLIT = {
-    TRAIN_SPLIT: os.environ.get("TRAIN_FILTER_HQ", "1").lower()
-        not in {"0", "false", "no"},
-    EVAL_SPLIT: os.environ.get("EVAL_FILTER_HQ", "1").lower()
-        not in {"0", "false", "no"},
+    TRAIN_SPLIT: os.environ.get("TRAIN_FILTER_HQ", "0").lower()
+    not in {"0", "false", "no"},
+    EVAL_SPLIT: os.environ.get("EVAL_FILTER_HQ", "0").lower()
+    not in {"0", "false", "no"},
+}
+DPO_AWARE_BY_SPLIT = {
+    TRAIN_SPLIT: os.environ.get("TRAIN_DPO_AWARE", "0").lower()
+    not in {"0", "false", "no"},
+    EVAL_SPLIT: os.environ.get("EVAL_DPO_AWARE", "0").lower()
+    not in {"0", "false", "no"},
 }
 
-TRAIN_STAGE = os.environ.get("TRAIN_STAGE", "dpo")
+TRAIN_STAGE = os.environ.get("TRAIN_STAGE", "gspo")
 TRAIN_VERSION = os.environ.get("TRAIN_VERSION", "v1")
-RUN_NAME = os.environ.get("RUN_NAME", f"nemotron-{TRAIN_STAGE}-{TRAIN_VERSION}")
+RUN_NAME = os.environ.get(
+    "RUN_NAME",
+    f"nemotron-{TRAIN_STAGE}-{TRAIN_VERSION}",
+)
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", str(WORKING_DIR / RUN_NAME)))
 ADAPTER_OUTPUT_DIR = Path(
     os.environ.get(
         "ADAPTER_OUTPUT_DIR",
-        str(WORKING_DIR / f"nemotron-lora-{TRAIN_STAGE}-{TRAIN_VERSION}"),
+        str(
+            WORKING_DIR
+            / f"nemotron-lora-{TRAIN_STAGE}-{TRAIN_VERSION}"
+        ),
     )
 )
 HF_USERNAME = os.environ.get("HF_USERNAME", "the-submitter")
@@ -162,16 +188,19 @@ KAGGLE_DATASET_REPO = os.environ.get(
 
 MAX_SEQ_LENGTH = int(os.environ.get("MAX_SEQ_LENGTH", "8192"))
 MAX_PROMPT_LENGTH = int(os.environ.get("MAX_PROMPT_LENGTH", "4096"))
-MAX_COMPLETION_LENGTH = optional_nonnegative_int("MAX_COMPLETION_LENGTH")
-# if MAX_COMPLETION_LENGTH is None:
-#     MAX_COMPLETION_LENGTH = MAX_SEQ_LENGTH - MAX_PROMPT_LENGTH
-# if MAX_PROMPT_LENGTH <= 0 or MAX_COMPLETION_LENGTH <= 0:
-#     raise ValueError("Prompt and completion lengths must be positive")
-# if MAX_PROMPT_LENGTH + MAX_COMPLETION_LENGTH > MAX_SEQ_LENGTH:
-#     raise ValueError(
-#         "MAX_PROMPT_LENGTH + MAX_COMPLETION_LENGTH must not exceed "
-#         "MAX_SEQ_LENGTH"
-#     )
+MAX_COMPLETION_LENGTH = int(
+    os.environ.get(
+        "MAX_COMPLETION_LENGTH",
+        str(MAX_SEQ_LENGTH - MAX_PROMPT_LENGTH),
+    )
+)
+if MAX_PROMPT_LENGTH <= 0 or MAX_COMPLETION_LENGTH <= 0:
+    raise ValueError("Prompt and completion lengths must be positive")
+if MAX_PROMPT_LENGTH + MAX_COMPLETION_LENGTH > MAX_SEQ_LENGTH:
+    raise ValueError(
+        "MAX_PROMPT_LENGTH + MAX_COMPLETION_LENGTH must not exceed "
+        "MAX_SEQ_LENGTH"
+    )
 
 DATASET_WORKERS = max(1, int(os.environ.get("DATASET_NUM_PROC", "8")))
 DATASET_NUM_PROC = DATASET_WORKERS if DATASET_WORKERS > 1 else None
@@ -182,36 +211,56 @@ PER_DEVICE_TRAIN_BATCH_SIZE = int(
 )
 PER_DEVICE_EVAL_BATCH_SIZE = int(os.environ.get("PER_DEVICE_EVAL_BATCH_SIZE", "1"))
 GRADIENT_ACCUMULATION_STEPS = int(
-    os.environ.get("GRADIENT_ACCUMULATION_STEPS", "16")
+    os.environ.get("GRADIENT_ACCUMULATION_STEPS", "4")
 )
-NUM_TRAIN_EPOCHS = float(os.environ.get("NUM_TRAIN_EPOCHS", "3"))
+NUM_TRAIN_EPOCHS = float(os.environ.get("NUM_TRAIN_EPOCHS", "1"))
 MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))
-LEARNING_RATE = float(os.environ.get("LEARNING_RATE", "2e-4"))
+LEARNING_RATE = float(os.environ.get("LEARNING_RATE", "5e-6"))
 WARMUP_RATIO = float(os.environ.get("WARMUP_RATIO", "0.03"))
-LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "10"))
+LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "1"))
 SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "50"))
 EVAL_STEPS = int(os.environ.get("EVAL_STEPS", str(SAVE_STEPS)))
 SAVE_TOTAL_LIMIT = int(os.environ.get("SAVE_TOTAL_LIMIT", "2"))
 LORA_R = int(os.environ.get("LORA_R", "32"))
 LORA_ALPHA = int(os.environ.get("LORA_ALPHA", "32"))
+MAX_LORA_RANK = int(os.environ.get("MAX_LORA_RANK", "32"))
 
-DPO_BETA = float(os.environ.get("DPO_BETA", "0.1"))
-DPO_LOSS_TYPE = os.environ.get("DPO_LOSS_TYPE", "sigmoid")
-PRECOMPUTE_REF_LOG_PROBS = os.environ.get(
-    "PRECOMPUTE_REF_LOG_PROBS",
-    "1",
-).lower() in {"1", "true", "yes"}
+NUM_GENERATIONS = int(os.environ.get("NUM_GENERATIONS", "4"))
+if NUM_GENERATIONS != 4:
+    raise ValueError("NUM_GENERATIONS must be 4 for this training configuration")
+TEMPERATURE = float(os.environ.get("TEMPERATURE", "1.0"))
+TOP_P = float(os.environ.get("TOP_P", "0.95"))
+TOP_K = optional_nonnegative_int("TOP_K")
+GRPO_BETA = float(os.environ.get("GRPO_BETA", "0.0"))
+GRPO_LOSS_TYPE = os.environ.get("GRPO_LOSS_TYPE", "dr_grpo")
+VLLM_GPU_MEMORY_UTILIZATION = float(
+    os.environ.get("VLLM_GPU_MEMORY_UTILIZATION", "0.95")
+)
+MATH_VERIFY_TIMEOUT_SECONDS = int(
+    os.environ.get("MATH_VERIFY_TIMEOUT_SECONDS", "5")
+)
+if MATH_VERIFY_TIMEOUT_SECONDS <= 0:
+    raise ValueError("MATH_VERIFY_TIMEOUT_SECONDS must be positive")
+
+EXACT_MATCH_WEIGHT = float(os.environ.get("EXACT_MATCH_WEIGHT", "5.0"))
+ANSWER_FUZZY_WEIGHT = float(os.environ.get("ANSWER_FUZZY_WEIGHT", "3.0"))
+COMPLETION_FUZZY_WEIGHT = float(
+    os.environ.get("COMPLETION_FUZZY_WEIGHT", "0.15")
+)
+BOXED_WEIGHT = float(os.environ.get("BOXED_WEIGHT", "1.0"))
+THINK_WEIGHT = float(os.environ.get("THINK_WEIGHT", "0.25"))
+
 REPORT_TO = os.environ.get("REPORT_TO", "wandb")
 RESUME_FROM_CHECKPOINT = os.environ.get("RESUME_FROM_CHECKPOINT", "0")
-PUSH_TO_HUB = os.environ.get("PUSH_TO_HUB", "0").lower() in {
-    "1",
-    "true",
-    "yes",
+PUSH_TO_HUB = os.environ.get("PUSH_TO_HUB", "0").lower() not in {
+    "0",
+    "false",
+    "no",
 }
-PUSH_TO_KAGGLE = os.environ.get("PUSH_TO_KAGGLE", "0").lower() in {
-    "1",
-    "true",
-    "yes",
+PUSH_TO_KAGGLE = os.environ.get("PUSH_TO_KAGGLE", "0").lower() not in {
+    "0",
+    "false",
+    "no",
 }
 KEEP_IN_MEMORY = os.environ.get("KEEP_IN_MEMORY", "1").lower() not in {
     "0",
@@ -223,6 +272,16 @@ BOXED_ANSWER_INSTRUCTION = (
     "\nPlease put your final answer inside `\\boxed{}`. "
     "For example: `\\boxed{your answer}`"
 )
+BOXED_START_RE = re.compile(r"\\boxed\{")
+THINK_RE = re.compile(r"<think>(.*?)</think>", re.IGNORECASE | re.DOTALL)
+FALLBACK_ANSWER_PATTERNS = [
+    re.compile(r"The final answer is:\s*([^\n]+)", re.IGNORECASE),
+    re.compile(r"Final answer is:\s*([^\n]+)", re.IGNORECASE),
+    re.compile(r"Final answer\s*[:：]\s*([^\n]+)", re.IGNORECASE),
+    re.compile(r"final answer\s*[:：]\s*([^\n]+)", re.IGNORECASE),
+]
+NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
+BINARY_RE = re.compile(r"[01]+")
 
 if REPORT_TO == "wandb":
     os.environ.setdefault("WANDB_MODE", "offline")
@@ -239,13 +298,6 @@ def clean_text(value: Any) -> Optional[str]:
     text = str(value).strip()
     return text or None
 
-
-def is_preference_example(example: dict[str, Any]) -> bool:
-    return (
-        clean_text(example.get("prompt")) is not None
-        and clean_text(example.get("chosen")) is not None
-        and clean_text(example.get("rejected")) is not None
-    )
 
 HQ_SOURCES = {
     "nvidia-nemotron-model-reasoning-challenge",
@@ -265,64 +317,52 @@ def is_high_quality_example(example: dict[str, Any]) -> bool:
     # return final_answer is not None and final_answer.isalnum()
 
 
+def is_reward_example(example: dict[str, Any]) -> bool:
+    return (
+        clean_text(example.get("prompt")) is not None
+        and clean_text(example.get("final_answer")) is not None
+    )
+
+
 def build_user_content(prompt: Any) -> str:
     normalized_prompt = clean_text(prompt)
     if normalized_prompt is None:
-        raise ValueError("Cannot format DPO data without a prompt")
+        raise ValueError("Cannot format GRPO data without a prompt")
     return normalized_prompt + BOXED_ANSWER_INSTRUCTION
 
 
-THINK_OPEN_RE = re.compile(r"^\s*<think>\s*", flags=re.IGNORECASE)
-THINK_CLOSE_RE = re.compile(r"\s*</think>\s*", flags=re.IGNORECASE)
-
-
-def remove_leading_think(value: str, remove_closing: bool = False) -> str:
-    has_opening = THINK_OPEN_RE.match(value) is not None
-    has_closing = remove_closing and THINK_CLOSE_RE.search(value) is not None
-    if not has_opening and not has_closing:
-        return value
-    value = THINK_OPEN_RE.sub("", value, count=1)
-    if remove_closing:
-        value = THINK_CLOSE_RE.sub("\n", value, count=1)
-    return value.lstrip()
-
-
-def render_dpo_example(
-    example: dict[str, Any],
-    tokenizer: Any,
-) -> dict[str, str]:
-    chosen = clean_text(example.get("chosen"))
-    rejected = clean_text(example.get("rejected"))
-    if chosen is None or rejected is None:
-        raise ValueError("Dataset must be filtered before DPO formatting")
-
-    prompt_messages = [
-        {
-            "role": "user",
-            "content": build_user_content(example.get("prompt")),
-        }
-    ]
-    prompt = tokenizer.apply_chat_template(
-        prompt_messages,
-        tokenize=False,
-        add_generation_prompt=True,
-    )
-    stripped_prompt = prompt.rstrip()
-    if stripped_prompt.endswith("<think></think>"):
-        chosen = remove_leading_think(chosen, remove_closing=True)
-        rejected = remove_leading_think(rejected, remove_closing=True)
-    elif stripped_prompt.endswith("<think>"):
-        chosen = remove_leading_think(chosen, remove_closing=False)
-        rejected = remove_leading_think(rejected, remove_closing=False)
+def build_grpo_example(example: dict[str, Any]) -> dict[str, Any]:
+    final_answer = clean_text(example.get("final_answer"))
+    if final_answer is None:
+        raise ValueError("Dataset must be filtered before GRPO formatting")
     return {
-        "prompt": prompt,
-        "chosen": chosen,
-        "rejected": rejected,
+        "prompt": [
+            {
+                "role": "user",
+                "content": build_user_content(example.get("prompt")),
+            }
+        ],
+        "response": clean_text(example.get("response")),
+        "reasoning": clean_text(example.get("reasoning")),
+        "final_answer": final_answer,
     }
 
 
+def dpo_priority(example: dict[str, Any]) -> int:
+    chosen = clean_text(example.get("chosen"))
+    rejected = clean_text(example.get("rejected"))
+    selected = bool(example.get("dpo_selected"))
+    if rejected is not None and chosen is None:
+        return 0
+    if selected and chosen is not None and rejected is not None:
+        return 1
+    if selected:
+        return 2
+    return 3
+
+
 # %%
-def load_preference_dataset():
+def load_reasoning_dataset():
     from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
 
     dataset_path = Path(DATASET_PATH)
@@ -374,7 +414,13 @@ def apply_source_options(dataset, split_name: str):
     include_sources = options["include"]
     order_sources = options["order"]
     exclude_sources = set(options["exclude"])
-    if not include_sources and not order_sources and not exclude_sources:
+    dpo_aware = DPO_AWARE_BY_SPLIT.get(split_name)
+    if (
+        not include_sources
+        and not order_sources
+        and not exclude_sources
+        and not dpo_aware
+    ):
         return dataset
     if "source" not in dataset.column_names:
         raise KeyError(
@@ -427,33 +473,40 @@ def apply_source_options(dataset, split_name: str):
     indices_by_source: dict[Any, list[int]] = {}
     for index, source in enumerate(dataset["source"]):
         indices_by_source.setdefault(source, []).append(index)
-    selected_indices = [
-        index
-        for source in ordered_sources
-        for index in indices_by_source.get(source, [])
-    ]
+
+    selected_indices: list[int] = []
+    for source in ordered_sources:
+        source_indices = indices_by_source.get(source, [])
+        if dpo_aware:
+            source_indices = sorted(
+                source_indices,
+                key=lambda index: dpo_priority(dataset[index]),
+            )
+        selected_indices.extend(source_indices)
+
     ordered = dataset.select(selected_indices, keep_in_memory=KEEP_IN_MEMORY)
     print(
         f"{split_name}: source order={ordered_sources}; "
-        f"retained={len(ordered):,}"
+        f"dpo_aware={dpo_aware}; retained={len(ordered):,}"
     )
     return ordered
 
 
 def prepare_split(
     dataset,
-    tokenizer,
     split_name: str,
     allow_empty: bool = False,
 ):
+    from datasets import Features, List, Value
+
     original_size = len(dataset)
     dataset = dataset.filter(
-        is_preference_example,
+        is_reward_example,
         num_proc=DATASET_NUM_PROC,
-        desc=f"{split_name}: keep complete preferences",
+        desc=f"{split_name}: keep reward-ready examples",
         keep_in_memory=KEEP_IN_MEMORY,
     )
-    if FILTER_HQ_BY_SPLIT.get(split_name):
+    if FILTER_HQ_BY_SPLIT.get(split_name, False):
         before_hq = len(dataset)
         dataset = dataset.filter(
             is_high_quality_example,
@@ -467,24 +520,32 @@ def prepare_split(
         )
     if not len(dataset):
         if allow_empty:
-            print(f"{split_name}: no preference examples after filtering")
+            print(f"{split_name}: no reward-ready examples after filtering")
             return None
-        raise ValueError(
-            f"{split_name} has no preference examples after filtering"
-        )
+        raise ValueError(f"{split_name} has no reward-ready examples")
 
+    grpo_features = Features(
+        {
+            "prompt": List(
+                {
+                    "role": Value("string"),
+                    "content": Value("string"),
+                    "reasoning_content": Value("string"),
+                }
+            ),
+            "response": Value("string"),
+            "reasoning": Value("string"),
+            "final_answer": Value("string"),
+        }
+    )
     dataset = dataset.map(
-        render_dpo_example,
-        fn_kwargs={"tokenizer": tokenizer},
+        build_grpo_example,
         remove_columns=dataset.column_names,
+        features=grpo_features,
         num_proc=DATASET_NUM_PROC,
-        desc=f"{split_name}: apply DPO chat template",
+        desc=f"{split_name}: build GRPO conversations",
         keep_in_memory=KEEP_IN_MEMORY,
     )
-    if dataset.column_names != ["prompt", "chosen", "rejected"]:
-        raise RuntimeError(
-            f"{split_name}: unexpected DPO columns {dataset.column_names}"
-        )
     print(f"{split_name}: retained {len(dataset):,}/{original_size:,} examples")
     return dataset
 
@@ -494,8 +555,7 @@ def select_index_range(
     min_idx: Optional[int],
     max_idx: Optional[int],
     split_name: str,
-    shuffle: bool = False,
-    seed: int = SEED,
+    shuffle: bool,
 ):
     start = 0 if min_idx is None else min_idx
     stop = len(dataset) if max_idx is None else min(max_idx, len(dataset))
@@ -507,11 +567,13 @@ def select_index_range(
         raise ValueError(
             f"{split_name}: min index {start} is outside dataset size {len(dataset)}"
         )
-
     selected = (
         dataset
         if start == 0 and stop == len(dataset)
-        else dataset.select(range(start, stop), keep_in_memory=KEEP_IN_MEMORY)
+        else dataset.select(
+            range(start, stop),
+            keep_in_memory=KEEP_IN_MEMORY,
+        )
     )
     if not len(selected):
         raise ValueError(
@@ -523,20 +585,22 @@ def select_index_range(
             f"({len(selected):,} examples)"
         )
     if shuffle:
-        selected = selected.shuffle(seed=seed, keep_in_memory=KEEP_IN_MEMORY)
-        print(f"{split_name}: shuffled {len(selected):,} examples with seed {seed}")
+        selected = selected.shuffle(
+            seed=SEED,
+            keep_in_memory=KEEP_IN_MEMORY,
+        )
+        print(f"{split_name}: shuffled {len(selected):,} examples with seed {SEED}")
     return selected
 
 
-def prepare_datasets(tokenizer):
-    dataset_dict = load_preference_dataset()
+def prepare_datasets():
+    dataset_dict = load_reasoning_dataset()
     train_source_dataset = apply_source_options(
         dataset_dict[TRAIN_SPLIT],
         TRAIN_SPLIT,
     )
     train_dataset = prepare_split(
         train_source_dataset,
-        tokenizer,
         TRAIN_SPLIT,
     )
     train_dataset = select_index_range(
@@ -544,19 +608,21 @@ def prepare_datasets(tokenizer):
         TRAIN_MIN_IDX,
         TRAIN_MAX_IDX,
         TRAIN_SPLIT,
-        TRAIN_SHUFFLE,
-        SEED,
+        SHUFFLE_BY_SPLIT[TRAIN_SPLIT],
     )
 
     eval_dataset = None
-    if EVAL_SPLIT in dataset_dict and len(dataset_dict[EVAL_SPLIT]):
+    if (
+        EVAL_SPLIT
+        and EVAL_SPLIT in dataset_dict
+        and len(dataset_dict[EVAL_SPLIT])
+    ):
         eval_source_dataset = apply_source_options(
             dataset_dict[EVAL_SPLIT],
             EVAL_SPLIT,
         )
         eval_dataset = prepare_split(
             eval_source_dataset,
-            tokenizer,
             EVAL_SPLIT,
             allow_empty=True,
         )
@@ -566,10 +632,257 @@ def prepare_datasets(tokenizer):
                 EVAL_MIN_IDX,
                 EVAL_MAX_IDX,
                 EVAL_SPLIT,
-                EVAL_SHUFFLE,
-                SEED,
+                SHUFFLE_BY_SPLIT[EVAL_SPLIT],
             )
     return train_dataset, eval_dataset
+
+
+# %%
+def extract_competition_boxed_answer(text: Any) -> Optional[str]:
+    if not text:
+        return None
+    value = str(text)
+    boxed_starts = list(BOXED_START_RE.finditer(value))
+    matches = []
+    for index, match in enumerate(boxed_starts):
+        start = match.end()
+        end = (
+            boxed_starts[index + 1].start()
+            if index + 1 < len(boxed_starts)
+            else len(value)
+        )
+        segment = value[start:end]
+        last_brace = segment.rfind("}")
+        matches.append(segment[:last_brace] if last_brace != -1 else segment)
+    if not matches:
+        return None
+    non_empty = [match.strip() for match in matches if match.strip()]
+    return non_empty[-1] if non_empty else matches[-1].strip()
+
+
+def extract_boxed_spans(text: Any) -> list[tuple[int, int, str]]:
+    if not text:
+        return []
+    value = str(text)
+    spans: list[tuple[int, int, str]] = []
+    cursor = 0
+    marker = r"\boxed{"
+    while True:
+        start = value.find(marker, cursor)
+        if start < 0:
+            break
+        content_start = start + len(marker)
+        depth = 1
+        index = content_start
+        while index < len(value) and depth:
+            if value[index] == "{":
+                depth += 1
+            elif value[index] == "}":
+                depth -= 1
+            index += 1
+        if depth == 0:
+            spans.append((start, index, value[content_start : index - 1]))
+            cursor = index
+        else:
+            cursor = content_start
+    return spans
+
+
+def extract_balanced_boxed_answer(text: Any) -> Optional[str]:
+    spans = extract_boxed_spans(text)
+    if not spans:
+        return None
+    non_empty = [
+        answer.strip()
+        for _start, _end, answer in spans
+        if answer.strip()
+    ]
+    return non_empty[-1] if non_empty else spans[-1][2].strip()
+
+
+def extract_fallback_answer(text: Any) -> Optional[str]:
+    value = clean_text(text)
+    if value is None:
+        return None
+    for pattern in FALLBACK_ANSWER_PATTERNS:
+        matches = pattern.findall(value)
+        if matches:
+            return matches[-1].strip()
+    matches = NUMBER_RE.findall(value)
+    if matches:
+        return matches[-1]
+    lines = [line.strip() for line in value.splitlines() if line.strip()]
+    return lines[-1] if lines else None
+
+
+def extract_final_answers(text: Any) -> list[Optional[str]] | Optional[str]:
+    boxed_answers = [
+        extract_competition_boxed_answer(text),
+        extract_balanced_boxed_answer(text),
+    ]
+    if any(clean_text(answer) is not None for answer in boxed_answers):
+        return boxed_answers
+    fallback_answer = extract_fallback_answer(text)
+    return fallback_answer
+
+
+def verify(stored_answer: Any, predicted: Any) -> bool:
+    stored = clean_text(stored_answer)
+    prediction = clean_text(predicted)
+    if not stored:
+        return not prediction
+
+    if BINARY_RE.fullmatch(stored):
+        return prediction.casefold() == stored.casefold()
+
+    try:
+        if math.isclose(
+            float(stored),
+            float(prediction),
+            rel_tol=1e-2,
+            abs_tol=1e-5,
+        ):
+            return True
+    except Exception:
+        pass
+
+    try:
+        if math_verify.verify(
+            math_verify.parse(stored),
+            math_verify.parse(prediction),
+            float_rounding=2,
+            numeric_precision=2,
+            strict=True,
+            allow_set_relation_comp=True,
+            timeout_seconds=MATH_VERIFY_TIMEOUT_SECONDS,
+        ):
+            return True
+    except Exception:
+        pass
+
+    return prediction.casefold() == stored.casefold()
+
+
+def combine_reasoning_response(reasoning: Any, response: Any) -> Optional[str]:
+    normalized_response = clean_text(response)
+    if normalized_response is None:
+        return None
+    normalized_reasoning = clean_text(reasoning)
+    if normalized_reasoning is None:
+        return normalized_response
+    return (
+        f"<think>\n{normalized_reasoning}\n</think>\n"
+        f"{normalized_response}"
+    )
+
+
+def completion_text(completion: Any) -> str:
+    if isinstance(completion, str):
+        return completion
+    if isinstance(completion, dict):
+        return str(completion.get("content") or "")
+    # if isinstance(completion, list):
+    #     return "".join(
+    #         str(message.get("content") or "")
+    #         for message in completion
+    #         if isinstance(message, dict)
+    #     )
+    try:
+        return str(completion[0].get("content", ""))
+    except Exception:
+        pass
+    return str(completion or "")
+
+
+def normalized_fuzzy_score(left: Any, right: Any) -> float:
+    left_text = utils.default_process(clean_text(left) or "")
+    right_text = utils.default_process(clean_text(right) or "")
+    if not left_text or not right_text:
+        return 0.0
+    return max(
+        fuzz.ratio(left_text, right_text),
+        fuzz.token_set_ratio(left_text, right_text),
+    ) / 100.0
+
+
+def normalized_token_set_score(left: Any, right: Any) -> float:
+    left_text = utils.default_process(clean_text(left) or "")
+    right_text = utils.default_process(clean_text(right) or "")
+    if not left_text or not right_text:
+        return 0.0
+    return fuzz.token_set_ratio(left_text, right_text) / 100.0
+
+
+def unified_reward(
+    prompts,
+    completions,
+    response,
+    reasoning,
+    final_answer,
+    **kwargs,
+) -> list[float]:
+    scores: list[float] = []
+
+    for completion, reference_response, reference_reasoning, target in zip(
+        completions,
+        response,
+        reasoning,
+        final_answer,
+        strict=True,
+    ):
+        text = completion_text(completion)
+
+        extracted_answers = extract_final_answers(text)
+
+        if isinstance(extracted_answers, list):
+            boxed_answers = extracted_answers
+        else:
+            extracted_answers = [extracted_answers]
+            boxed_answers = [None]
+
+        exact_score = max(
+            (
+                1.0 if verify(target, extracted_answer) else 0.0
+                for extracted_answer in extracted_answers
+            ),
+            default=0.0,
+        )
+        answer_fuzzy_score = max(
+            (
+                normalized_fuzzy_score(extracted_answer, target)
+                for extracted_answer in extracted_answers
+            ),
+            default=0.0,
+        )
+        boxed_score = max(
+            (
+                1.0 if clean_text(extracted_answer) is not None else 0.0
+                for extracted_answer in boxed_answers
+            ),
+            default=0.0,
+        )
+        reference_completion = combine_reasoning_response(
+            reference_reasoning,
+            reference_response,
+        )
+        completion_fuzzy_score = normalized_token_set_score(
+            text,
+            reference_completion,
+        )
+        think_matches = [
+            match.group(1).strip()
+            for match in THINK_RE.finditer(text)
+        ]
+        think_score = 1.0 if any(think_matches) else 0.0
+
+        scores.append(
+            EXACT_MATCH_WEIGHT * exact_score
+            + ANSWER_FUZZY_WEIGHT * answer_fuzzy_score
+            + COMPLETION_FUZZY_WEIGHT * completion_fuzzy_score
+            + BOXED_WEIGHT * boxed_score
+            + THINK_WEIGHT * think_score
+        )
+    return scores
 
 
 # %%
@@ -611,23 +924,22 @@ def load_model_and_tokenizer():
 
     adapter_input_path = prepare_adapter_input_path()
     model_source = adapter_input_path or MODEL_PATH
-
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=model_source,
         max_seq_length=MAX_SEQ_LENGTH,
         load_in_4bit=False,
         load_in_8bit=False,
         full_finetuning=False,
+        fast_inference=True,
+        max_lora_rank=MAX_LORA_RANK,
         trust_remote_code=True,
-        unsloth_force_compile=False,
-        attn_implementation="eager",
         token=HF_KEY,
         use_gradient_checkpointing="unsloth",
-        gpu_memory_utilization=0.95,
+        gpu_memory_utilization=VLLM_GPU_MEMORY_UTILIZATION,
     )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "right"
+    tokenizer.padding_side = "left"
 
     if adapter_input_path is None:
         model = FastLanguageModel.get_peft_model(
@@ -655,18 +967,15 @@ def load_model_and_tokenizer():
             use_rslora=False,
             loftq_config=None,
         )
-    else:
-        trainable_parameters = sum(
-            parameter.numel()
-            for parameter in model.parameters()
-            if parameter.requires_grad
-        )
-        if trainable_parameters == 0:
-            raise RuntimeError(
-                "The SFT adapter loaded without trainable parameters; "
-                "DPO would not update the existing LoRA"
-            )
-        print(f"Trainable adapter parameters: {trainable_parameters:,}")
+
+    trainable_parameters = sum(
+        parameter.numel()
+        for parameter in model.parameters()
+        if parameter.requires_grad
+    )
+    if trainable_parameters == 0:
+        raise RuntimeError("GRPO/GSPO model has no trainable parameters")
+    print(f"Trainable adapter parameters: {trainable_parameters:,}")
     return model, tokenizer
 
 
@@ -687,87 +996,112 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 ADAPTER_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-from unsloth import FastLanguageModel, PatchDPOTrainer  # noqa: F401
-
-PatchDPOTrainer()
+from unsloth import FastLanguageModel  # noqa: F401
 
 import torch
-from trl import DPOConfig, DPOTrainer
+from trl import GRPOConfig, GRPOTrainer
 
 if not torch.cuda.is_available():
-    raise RuntimeError("DPO training requires a CUDA GPU")
+    raise RuntimeError("GRPO/GSPO training requires a CUDA GPU")
 
 # %%
 model, tokenizer = load_model_and_tokenizer()
 
 # %%
-train_dataset, eval_dataset = prepare_datasets(tokenizer)
+train_dataset, eval_dataset = prepare_datasets()
 
 # %%
 has_eval = eval_dataset is not None and len(eval_dataset) > 0
 bf16 = torch.cuda.is_bf16_supported()
 
-dpo_trainer = DPOTrainer(
+training_args = GRPOConfig(
+    output_dir=str(OUTPUT_DIR),
+    run_name=RUN_NAME,
+    max_prompt_length=MAX_PROMPT_LENGTH,
+    max_completion_length=MAX_COMPLETION_LENGTH,
+    num_generations=NUM_GENERATIONS,
+    temperature=TEMPERATURE,
+    top_p=TOP_P,
+    top_k=TOP_K,
+    use_vllm=True,
+    vllm_mode="colocate",
+    vllm_gpu_memory_utilization=VLLM_GPU_MEMORY_UTILIZATION,
+    importance_sampling_level="sequence",
+    beta=GRPO_BETA,
+    loss_type=GRPO_LOSS_TYPE,
+    scale_rewards=False,
+    mask_truncated_completions=True,
+    per_device_train_batch_size=PER_DEVICE_TRAIN_BATCH_SIZE,
+    per_device_eval_batch_size=PER_DEVICE_EVAL_BATCH_SIZE,
+    gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
+    gradient_checkpointing=True,
+    gradient_checkpointing_kwargs={"use_reentrant": False},
+    generation_batch_size=None, # get this
+    steps_per_generation=None,  # get this
+    num_train_epochs=NUM_TRAIN_EPOCHS,
+    max_steps=MAX_STEPS,
+    learning_rate=LEARNING_RATE,
+    warmup_ratio=WARMUP_RATIO,
+    logging_steps=LOGGING_STEPS,
+    logging_first_step=True,
+    save_strategy="steps",
+    save_steps=SAVE_STEPS,
+    save_total_limit=SAVE_TOTAL_LIMIT,
+    eval_strategy="steps" if has_eval else "no",
+    eval_steps=EVAL_STEPS if has_eval else None,
+    eval_accumulation_steps=GRADIENT_ACCUMULATION_STEPS if has_eval else None,
+    load_best_model_at_end=has_eval,
+    metric_for_best_model="eval_reward" if has_eval else None,
+    greater_is_better=True if has_eval else None,
+    adam_beta1=0.9,
+    adam_beta2=0.999,
+    adam_epsilon=1e-8,
+    optim="adamw_8bit",
+    epsilon=3e-4,
+    epsilon_high=4e-4,
+    weight_decay=0.0,
+    lr_scheduler_type="cosine",
+    max_grad_norm=1e9,
+    seed=SEED,
+    data_seed=SEED,
+    report_to=REPORT_TO,
+    bf16=bf16,
+    fp16=not bf16,
+    tf32=None,
+    remove_unused_columns=False,
+    shuffle_dataset=SHUFFLE_BY_SPLIT[TRAIN_SPLIT],
+)
+
+trainer = GRPOTrainer(
     model=model,
-    ref_model=None,
     processing_class=tokenizer,
+    reward_funcs=[unified_reward],
+    args=training_args,
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
-    args=DPOConfig(
-        output_dir=str(OUTPUT_DIR),
-        run_name=RUN_NAME,
-        max_length=MAX_SEQ_LENGTH,
-        max_prompt_length=MAX_PROMPT_LENGTH,
-        max_completion_length=MAX_COMPLETION_LENGTH,
-        dataset_num_proc=DATASET_WORKERS,
-        per_device_train_batch_size=PER_DEVICE_TRAIN_BATCH_SIZE,
-        per_device_eval_batch_size=PER_DEVICE_EVAL_BATCH_SIZE,
-        gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
-        gradient_checkpointing=True,
-        gradient_checkpointing_kwargs={"use_reentrant": False},
-        num_train_epochs=NUM_TRAIN_EPOCHS,
-        max_steps=MAX_STEPS,
-        learning_rate=LEARNING_RATE,
-        warmup_ratio=WARMUP_RATIO,
-        logging_steps=LOGGING_STEPS,
-        logging_first_step=True,
-        save_strategy="steps",
-        save_steps=SAVE_STEPS,
-        save_total_limit=SAVE_TOTAL_LIMIT,
-        eval_strategy="steps" if has_eval else "no",
-        eval_steps=EVAL_STEPS if has_eval else None,
-        eval_accumulation_steps=GRADIENT_ACCUMULATION_STEPS if has_eval else None,
-        load_best_model_at_end=has_eval,
-        metric_for_best_model="eval_loss" if has_eval else None,
-        greater_is_better=False if has_eval else None,
-        optim="adamw_8bit",
-        adam_beta1=0.9,
-        adam_beta2=0.999,
-        adam_epsilon=1e-8,
-        weight_decay=0.0,
-        lr_scheduler_type="cosine",
-        seed=SEED,
-        data_seed=SEED,
-        report_to=REPORT_TO,
-        bf16=bf16,
-        fp16=not bf16,
-        tf32=None,
-        padding_free=False,
-        beta=DPO_BETA,
-        loss_type=[DPO_LOSS_TYPE],
-        precompute_ref_log_probs=PRECOMPUTE_REF_LOG_PROBS,
-        max_grad_norm=1e9,
-    ),
 )
 
 # %%
-sample = train_dataset[0]
-print("Rendered DPO prompt:")
-print(sample["prompt"][:2000])
-print("Chosen completion:")
-print(sample["chosen"][:2000])
-print("Rejected completion:")
-print(sample["rejected"][:2000])
+print("GRPO/GSPO training sample:")
+print(train_dataset[0])
+sample_reward = unified_reward(
+    prompts=[train_dataset[0]["prompt"]],
+    completions=[
+        [
+            {
+                "role": "assistant",
+                "content": (
+                    "<think>\nExample reasoning\n</think>\n"
+                    f"\\boxed{{{train_dataset[0]['final_answer']}}}"
+                ),
+            }
+        ]
+    ],
+    response=[train_dataset[0]["response"]],
+    reasoning=[train_dataset[0]["reasoning"]],
+    final_answer=[train_dataset[0]["final_answer"]],
+)
+print(f"Reward sanity check: {sample_reward}")
 
 gpu = torch.cuda.get_device_properties(0)
 start_reserved = torch.cuda.max_memory_reserved() / 1024**3
@@ -777,12 +1111,12 @@ print(
 )
 
 # %%
-trainer_stats = dpo_trainer.train(
+trainer_stats = trainer.train(
     resume_from_checkpoint=resolve_resume_from_checkpoint()
 )
 
 # %%
-dpo_trainer.save_state()
+trainer.save_state()
 model.save_pretrained(str(ADAPTER_OUTPUT_DIR))
 tokenizer.save_pretrained(str(ADAPTER_OUTPUT_DIR))
 
@@ -804,7 +1138,7 @@ peak_reserved = torch.cuda.max_memory_reserved() / 1024**3
 runtime = trainer_stats.metrics.get("train_runtime", 0.0)
 print(f"Training runtime: {runtime:.2f} seconds ({runtime / 60:.2f} minutes)")
 print(f"Peak reserved VRAM: {peak_reserved:.2f} GiB")
-print(f"Saved DPO-trained LoRA adapter to {ADAPTER_OUTPUT_DIR}")
+print(f"Saved GRPO/GSPO LoRA adapter to {ADAPTER_OUTPUT_DIR}")
 
 # %%
 if PUSH_TO_HUB:
