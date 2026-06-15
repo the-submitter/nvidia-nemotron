@@ -143,12 +143,12 @@ def optional_string_list(name: str, default: Optional[str] = None) -> list[str]:
 
 DEFAULT_TAKE = {
     "missing": {
-        "train": 1_500,
+        "train": 2_000,
         "validation": 50,
         "test": 0,
     },
     "existing": {
-        "train": 85,
+        "train": 114,
         "validation": 5,
         "test": 0,
     },
@@ -1243,13 +1243,21 @@ def save_and_upload(
         dataset_dict, 
         upload_to_hf: bool = UPLOAD_TO_HF,
         upload_to_kaggle: bool = UPLOAD_TO_KAGGLE, 
-) -> None:
-    LOCAL_OUTPUT_DIR.parent.mkdir(parents=True, exist_ok=True)
-    dataset_dict.save_to_disk(
-        str(LOCAL_OUTPUT_DIR),
-        num_proc=DATASET_NUM_PROC,
-    )
-    print(f"Saved updated dataset to {LOCAL_OUTPUT_DIR}")
+        save_to_disk: bool = True,
+) -> Any:
+    if isinstance(dataset_dict, (str, Path)):
+        from datasets import load_from_disk
+        dataset_path = dataset_dict
+        dataset_dict = load_from_disk(dataset_path, keep_in_memory=KEEP_IN_MEMORY)
+        print(f"Dataset loaded from {dataset_path}")
+
+    if save_to_disk:
+        LOCAL_OUTPUT_DIR.parent.mkdir(parents=True, exist_ok=True)
+        dataset_dict.save_to_disk(
+            str(LOCAL_OUTPUT_DIR),
+            num_proc=DATASET_NUM_PROC,
+        )
+        print(f"Saved updated dataset to {LOCAL_OUTPUT_DIR}")
 
     if upload_to_hf:
         try:
@@ -1281,12 +1289,12 @@ def save_and_upload(
                     KAGGLE_OUTPUT_DIR / f"{split_name}.parquet"
                 )
             kagglehub.dataset_upload(
-                handle=f"{KAGGLE_USERNAME}/{DATASET_TAG}",
+                handle=KAGGLE_DATASET_REPO,
                 local_dataset_dir=str(KAGGLE_OUTPUT_DIR),
             )
 
             kagglehub.dataset_upload(
-                handle=KAGGLE_DATASET_REPO,
+                handle=f"{KAGGLE_USERNAME}/{DATASET_TAG}-kaggle",
                 local_dataset_dir=WORKING_DIR,
                 version_notes=f"nemotron update dataset",
             )
@@ -1294,6 +1302,8 @@ def save_and_upload(
             print(f"Upload to Kaggle failed: {error}")
         else:
             print(f"Upload to Kaggle succeeded")
+
+    return dataset_dict
 
 
 # %%
@@ -1356,3 +1366,44 @@ if has_candidates:
 
 # %%
 save_and_upload(dataset_dict)
+# dataset_dict = save_and_upload(LOCAL_OUTPUT_DIR, save_to_disk=False)
+
+# %%
+# from datasets import load_from_disk
+# dataset_dict = load_from_disk(LOCAL_OUTPUT_DIR, keep_in_memory=KEEP_IN_MEMORY)
+
+for split in SPLIT_NAMES:
+    if ("chosen" not in dataset_dict[split].column_names 
+        or "rejected" not in dataset_dict[split].column_names):
+        continue
+
+    valid_samples_1 = dataset_dict[split].filter(
+        lambda x: x["chosen"] is not None 
+        and x["rejected"] is not None 
+        and len(x["chosen"]) > 0
+        and len(x["rejected"]) > 0,
+        keep_in_memory=KEEP_IN_MEMORY,
+        desc=f"{split}: find non-empty `chosen` and `rejected`",
+    )
+
+    valid_samples_2 = dataset_dict[split].filter(
+        lambda x: x["chosen"] is not None 
+        and (x["rejected"] is None or len(x["rejected"]) == 0)
+        and len(x["chosen"]) > 0,
+        keep_in_memory=KEEP_IN_MEMORY,
+        desc=f"{split}: find non-empty `chosen` only`",
+    )
+    
+    valid_samples_3 = dataset_dict[split].filter(
+        lambda x: x["rejected"] is not None 
+        and (x["chosen"] is None or len(x["chosen"]) == 0)
+        and len(x["rejected"]) > 0,
+        keep_in_memory=KEEP_IN_MEMORY,
+        desc=f"{split}: find non-empty `rejected` only",
+    )
+    
+    print(
+        f"{split}: Chosen and Rejected = {len(valid_samples_1)}, "
+        f"Chosen Only = {len(valid_samples_2)}, "
+        f"Rejected Only = {len(valid_samples_3)}"
+    )

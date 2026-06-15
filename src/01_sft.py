@@ -123,15 +123,15 @@ TRAIN_SHUFFLE = os.environ.get("TRAIN_SHUFFLE", "0").lower() not in {
     "false",
     "no",
 }
-EVAL_SHUFFLE = os.environ.get("EVAL_SHUFFLE", "1").lower() not in {
+EVAL_SHUFFLE = os.environ.get("EVAL_SHUFFLE", "0").lower() not in {
     "0",
     "false",
     "no",
 }
 FILTER_HQ_BY_SPLIT = {
-    TRAIN_SPLIT: os.environ.get("TRAIN_FILTER_HQ", "0").lower()
+    TRAIN_SPLIT: os.environ.get("TRAIN_FILTER_HQ", "1").lower()
         not in {"0", "false", "no"},
-    EVAL_SPLIT: os.environ.get("EVAL_FILTER_HQ", "0").lower()
+    EVAL_SPLIT: os.environ.get("EVAL_FILTER_HQ", "1").lower()
         not in {"0", "false", "no"},
 }
 

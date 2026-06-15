@@ -64,7 +64,7 @@ MODEL_PATH = os.environ.get(
 )
 ADAPTER_INPUT_PATH = os.environ.get(
     "ADAPTER_INPUT_PATH",
-    "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/lora-sft/1",
+    "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/lora-sft/7",
 )
 BASE_MODEL_ID = os.environ.get(
     "BASE_MODEL_ID", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16",
@@ -76,7 +76,7 @@ DATASET_PATH = os.environ.get(
 DATASET_REVISION = os.environ.get("DATASET_REVISION")
 HF_CACHE_DIR = Path(os.environ.get("HF_CACHE_DIR", "/tmp/hf_cache"))
 TRAIN_SPLIT = os.environ.get("TRAIN_SPLIT", "train")
-EVAL_SPLIT = os.environ.get("EVAL_SPLIT", "validation")
+EVAL_SPLIT = os.environ.get("EVAL_SPLIT", None)
 
 def optional_nonnegative_int(name: str, default: Optional[int] = None) -> Optional[int]:
     value = os.environ.get(name, str(default))
@@ -104,12 +104,12 @@ def optional_string_list(name: str, default: Optional[str] = None) -> list[str]:
     return [item.strip() for item in parsed if item.strip()]
 
 TRAIN_MIN_IDX = optional_nonnegative_int("TRAIN_MIN_IDX")
-TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX")
+TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX", 100)
 EVAL_MIN_IDX = optional_nonnegative_int("EVAL_MIN_IDX")
 EVAL_MAX_IDX = optional_nonnegative_int("EVAL_MAX_IDX")
 SOURCE_OPTIONS = {
     TRAIN_SPLIT: {
-        "include": optional_string_list("TRAIN_INCLUDE_SOURCES"),
+        "include": optional_string_list("TRAIN_INCLUDE_SOURCES", '["nvidia-nemotron-model-reasoning-challenge", "dgxchen/nemotron-cot-tong"]'),
         "order": optional_string_list("TRAIN_ORDER_BY_SOURCES"),
         "exclude": optional_string_list("TRAIN_EXCLUDE_SOURCES"),
     },
@@ -119,20 +119,20 @@ SOURCE_OPTIONS = {
         "exclude": optional_string_list("EVAL_EXCLUDE_SOURCES"),
     },
 }
-TRAIN_SHUFFLE = os.environ.get("TRAIN_SHUFFLE", "1").lower() not in {
+TRAIN_SHUFFLE = os.environ.get("TRAIN_SHUFFLE", "0").lower() not in {
     "0",
     "false",
     "no",
 }
-EVAL_SHUFFLE = os.environ.get("EVAL_SHUFFLE", "1").lower() not in {
+EVAL_SHUFFLE = os.environ.get("EVAL_SHUFFLE", "0").lower() not in {
     "0",
     "false",
     "no",
 }
 FILTER_HQ_BY_SPLIT = {
-    TRAIN_SPLIT: os.environ.get("TRAIN_FILTER_HQ", "0").lower()
+    TRAIN_SPLIT: os.environ.get("TRAIN_FILTER_HQ", "1").lower()
         not in {"0", "false", "no"},
-    EVAL_SPLIT: os.environ.get("EVAL_FILTER_HQ", "0").lower()
+    EVAL_SPLIT: os.environ.get("EVAL_FILTER_HQ", "1").lower()
         not in {"0", "false", "no"},
 }
 
@@ -184,7 +184,7 @@ PER_DEVICE_EVAL_BATCH_SIZE = int(os.environ.get("PER_DEVICE_EVAL_BATCH_SIZE", "1
 GRADIENT_ACCUMULATION_STEPS = int(
     os.environ.get("GRADIENT_ACCUMULATION_STEPS", "16")
 )
-NUM_TRAIN_EPOCHS = float(os.environ.get("NUM_TRAIN_EPOCHS", "1"))
+NUM_TRAIN_EPOCHS = float(os.environ.get("NUM_TRAIN_EPOCHS", "3"))
 MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))
 LEARNING_RATE = float(os.environ.get("LEARNING_RATE", "2e-4"))
 WARMUP_STEPS = int(os.environ.get("WARMUP_STEPS", "10"))

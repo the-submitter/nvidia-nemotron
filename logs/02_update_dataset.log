@@ -1,0 +1,781 @@
+train: initialize DPO columns (num_proc=8): 100%
+ 78868/78868 [00:01<00:00, 87271.34 examples/s]
+validation: initialize DPO columns (num_proc=8): 100%
+ 687/687 [00:00<00:00, 3160.71 examples/s]
+test: initialize DPO columns (num_proc=8): 100%
+ 687/687 [00:00<00:00, 3319.72 examples/s]
+
+train: candidate source order=['nvidia-nemotron-model-reasoning-challenge', 'dgxchen/nemotron-cot-tong', 'qwedsacf/competition_math', 'open-r1/OpenR1-Math-220k', 'EleutherAI/drop', 'tasksource/proofwriter', 'AI-MO/NuminaMath-1.5', 'openai/gsm8k', 'yale-nlp/FOLIO', 'BytedTsinghua-SIA/Enigmata-Eval', 'nvidia/OpenMathReasoning', 'WildEval/ZebraLogic', 'EleutherAI/asdiv', 'renma/ProntoQA', 'ChilleD/SVAMP']
+train: missing HQ filter retained 24,697/32,410 candidates
+train: existing HQ filter retained 36,833/46,458 candidates
+train: selected missing range [0, 1,500) (1,500 rows)
+train: selected existing range [0, 85) (85 rows)
+train: candidate source order=['nvidia-nemotron-model-reasoning-challenge', 'dgxchen/nemotron-cot-tong']
+train: mark finalized candidates (num_proc=8): 100%
+ 78868/78868 [00:01<00:00, 58398.49 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.72ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+train: candidates=1,585/78,868 (missing=1,500/24,697, existing=85/36,833)
+validation: missing HQ filter retained 158/232 candidates
+validation: existing HQ filter retained 349/455 candidates
+validation: selected missing range [0, 50) (50 rows)
+validation: selected existing range [0, 5) (5 rows)
+validation: mark finalized candidates (num_proc=8): 100%
+ 687/687 [00:00<00:00, 1713.65 examples/s]
+Creating parquet from Arrow format: 100%
+ 1/1 [00:00<00:00, 134.19ba/s]
+validation: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/validation.parquet
+validation: candidates=55/687 (missing=50/158, existing=5/349)
+test: missing HQ filter retained 154/232 candidates
+test: existing HQ filter retained 359/455 candidates
+test: selected missing range [0, 0) (0 rows)
+test: selected existing range [0, 0) (0 rows)
+test: candidates=0/687 (missing=0/154, existing=0/359)
+
+2026-06-14 16:52:58.250999: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1781455978.559682     898 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1781455978.648146     898 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1781455979.449249     898 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1781455979.449264     898 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1781455979.449265     898 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1781455979.449266     898 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+/usr/local/lib/python3.12/dist-packages/torchao/quantization/quant_api.py:1825: SyntaxWarning: invalid escape sequence '\.'
+  * regex for parameter names, must start with `re:`, e.g. `re:language\.layers\..+\.q_proj.weight`.
+INFO 06-14 16:53:13 [utils.py:233] non-default args: {'trust_remote_code': True, 'seed': 3407, 'max_model_len': 8192, 'enable_prefix_caching': True, 'gpu_memory_utilization': 0.95, 'max_num_seqs': 64, 'disable_log_stats': True, 'enable_lora': True, 'max_lora_rank': 32, 'enable_chunked_prefill': True, 'model': '/kaggle/input/models/metric/nemotron-3-nano-30b-a3b-bf16/transformers/default/1'}
+INFO 06-14 16:53:25 [model.py:533] Resolved architecture: NemotronHForCausalLM
+INFO 06-14 16:53:25 [model.py:1582] Using max model len 8192
+INFO 06-14 16:53:25 [scheduler.py:231] Chunked prefill is enabled with max_num_batched_tokens=16384.
+INFO 06-14 16:53:25 [config.py:427] Updating mamba_ssm_cache_dtype to 'float32' for NemotronH model
+WARNING 06-14 16:53:25 [config.py:372] Mamba cache mode is set to 'all' for NemotronHForCausalLM by default when prefix caching is enabled
+INFO 06-14 16:53:25 [config.py:392] Warning: Prefix caching in Mamba cache 'all' mode is currently enabled. Its support for Mamba layers is experimental. Please report any issues you may observe.
+INFO 06-14 16:53:25 [config.py:212] Setting attention block size to 2176 tokens to ensure that attention page size is >= mamba page size.
+INFO 06-14 16:53:25 [config.py:243] Padding mamba page size by 4.41% to ensure that mamba page size and attention page size are exactly equal.
+INFO 06-14 16:53:25 [vllm.py:754] Asynchronous scheduling is enabled.
+(EngineCore pid=1609) INFO 06-14 16:53:26 [core.py:103] Initializing a V1 LLM engine (v0.18.0) with config: model='/kaggle/input/models/metric/nemotron-3-nano-30b-a3b-bf16/transformers/default/1', speculative_config=None, tokenizer='/kaggle/input/models/metric/nemotron-3-nano-30b-a3b-bf16/transformers/default/1', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.bfloat16, max_seq_len=8192, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=False, quantization=None, enforce_eager=False, enable_return_routed_experts=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False), seed=3407, served_model_name=/kaggle/input/models/metric/nemotron-3-nano-30b-a3b-bf16/transformers/default/1, enable_prefix_caching=True, enable_chunked_prefill=True, pooler_config=None, compilation_config={'mode': <CompilationMode.VLLM_COMPILE: 3>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['none'], 'splitting_ops': ['vllm::unified_attention', 'vllm::unified_attention_with_output', 'vllm::unified_mla_attention', 'vllm::unified_mla_attention_with_output', 'vllm::mamba_mixer2', 'vllm::mamba_mixer', 'vllm::short_conv', 'vllm::linear_attention', 'vllm::plamo2_mamba_mixer', 'vllm::gdn_attention_core', 'vllm::olmo_hybrid_gdn_full_forward', 'vllm::kda_attention', 'vllm::sparse_attn_indexer', 'vllm::rocm_aiter_sparse_attn_indexer', 'vllm::unified_kv_cache_update', 'vllm::unified_mla_kv_cache_update'], 'compile_mm_encoder': False, 'compile_sizes': [], 'compile_ranges_endpoints': [16384], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.FULL_AND_PIECEWISE: (2, 1)>, 'cudagraph_num_of_warmups': 1, 'cudagraph_capture_sizes': [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': False, 'fuse_act_quant': False, 'fuse_attn_quant': False, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_allreduce_rms': False}, 'max_cudagraph_capture_size': 128, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': True, 'static_all_moe_layers': []}
+(EngineCore pid=1609) INFO 06-14 16:53:26 [parallel_state.py:1395] world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://172.19.2.2:57345 backend=nccl
+(EngineCore pid=1609) INFO 06-14 16:53:26 [parallel_state.py:1717] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, EP rank 0, EPLB rank N/A
+[W614 16:53:26.835567896 socket.cpp:207] [c10d] The hostname of the client socket cannot be retrieved. err=-3
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+(EngineCore pid=1609) INFO 06-14 16:53:27 [gpu_model_runner.py:4481] Starting to load model /kaggle/input/models/metric/nemotron-3-nano-30b-a3b-bf16/transformers/default/1...
+(EngineCore pid=1609) INFO 06-14 16:53:28 [unquantized.py:186] Using TRITON backend for Unquantized MoE
+(EngineCore pid=1609) INFO 06-14 16:53:29 [cuda.py:317] Using FLASH_ATTN attention backend out of potential backends: ['FLASH_ATTN', 'FLASHINFER', 'TRITON_ATTN', 'FLEX_ATTENTION'].
+(EngineCore pid=1609) INFO 06-14 16:53:29 [flash_attn.py:598] Using FlashAttention version 2
+(EngineCore pid=1609) <frozen importlib._bootstrap_external>:1301: FutureWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+(EngineCore pid=1609) <frozen importlib._bootstrap_external>:1301: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+Loading safetensors checkpoint shards: 100% Completed | 13/13 [08:40<00:00, 36.57s/it]
+(EngineCore pid=1609) INFO 06-14 17:02:09 [default_loader.py:384] Loading weights took 520.84 seconds
+(EngineCore pid=1609) INFO 06-14 17:02:09 [utils.py:98] MoE model detected. Using fused MoE LoRA implementation.
+(EngineCore pid=1609) INFO 06-14 17:02:09 [punica_selector.py:20] Using PunicaWrapperGPU.
+(EngineCore pid=1609) INFO 06-14 17:02:11 [gpu_model_runner.py:4566] Model loading took 60.64 GiB memory and 521.875314 seconds
+(EngineCore pid=1609) INFO 06-14 17:02:18 [backends.py:988] Using cache directory: /root/.cache/vllm/torch_compile_cache/ba002cdf8e/rank_0_0/backbone for vLLM's torch.compile
+(EngineCore pid=1609) INFO 06-14 17:02:18 [backends.py:1048] Dynamo bytecode transform time: 6.40 s
+(EngineCore pid=1609) INFO 06-14 17:02:21 [backends.py:371] Cache the graph of compile range (1, 16384) for later use
+(EngineCore pid=1609) /usr/local/lib/python3.12/dist-packages/torch/_inductor/compile_fx.py:321: UserWarning: TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. Consider setting `torch.set_float32_matmul_precision('high')` for better performance.
+(EngineCore pid=1609)   warnings.warn(
+(EngineCore pid=1609) INFO 06-14 17:02:27 [backends.py:387] Compiling a graph for compile range (1, 16384) takes 8.71 s
+(EngineCore pid=1609) INFO 06-14 17:02:28 [decorators.py:627] saved AOT compiled function to /root/.cache/vllm/torch_compile_cache/torch_aot_compile/1f7dc0a82199e0f76679e689caf48ca505bd930cc780afc023dea055ac604f5c/rank_0_0/model
+(EngineCore pid=1609) INFO 06-14 17:02:28 [monitor.py:48] torch.compile took 15.98 s in total
+(EngineCore pid=1609) WARNING 06-14 17:02:29 [fused_moe.py:1093] Using default MoE config. Performance might be sub-optimal! Config file not found at /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/fused_moe/configs/E=128,N=1856,device_name=NVIDIA_RTX_PRO_6000_Blackwell_Server_Edition.json
+(EngineCore pid=1609) INFO 06-14 17:02:31 [monitor.py:76] Initial profiling/warmup run took 3.38 s
+(EngineCore pid=1609) WARNING 06-14 17:02:35 [kv_cache_utils.py:1056] Add 1 padding layers, may waste at most 4.35% KV cache memory
+(EngineCore pid=1609) INFO 06-14 17:02:35 [kv_cache_utils.py:826] Overriding num_gpu_blocks=0 with num_gpu_blocks_override=128
+(EngineCore pid=1609) INFO 06-14 17:02:35 [gpu_model_runner.py:5607] Profiling CUDA graph memory: PIECEWISE=38 (largest=128), FULL=22 (largest=64)
+(EngineCore pid=1609) WARNING 06-14 17:02:36 [utils.py:268] Using default LoRA kernel configs
+(EngineCore pid=1609) INFO 06-14 17:03:21 [gpu_model_runner.py:5686] Estimated CUDA graph memory: 0.26 GiB total
+(EngineCore pid=1609) INFO 06-14 17:03:22 [gpu_worker.py:456] Available KV cache memory: 21.35 GiB
+(EngineCore pid=1609) INFO 06-14 17:03:22 [gpu_worker.py:490] In v0.19, CUDA graph memory profiling will be enabled by default (VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1), which more accurately accounts for CUDA graph memory during KV cache allocation. To try it now, set VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 and increase --gpu-memory-utilization from 0.9500 to 0.9527 to maintain the same effective KV cache size.
+(EngineCore pid=1609) WARNING 06-14 17:03:22 [kv_cache_utils.py:1056] Add 1 padding layers, may waste at most 4.35% KV cache memory
+(EngineCore pid=1609) INFO 06-14 17:03:22 [kv_cache_utils.py:1316] GPU KV cache size: 744,192 tokens
+(EngineCore pid=1609) INFO 06-14 17:03:22 [kv_cache_utils.py:1321] Maximum concurrency for 8,192 tokens per request: 85.70x
+(EngineCore pid=1609) 2026-06-14 17:03:22,371 - INFO - autotuner.py:262 - flashinfer.jit: [Autotuner]: Autotuning process starts ...
+(EngineCore pid=1609) 2026-06-14 17:03:22,502 - INFO - autotuner.py:268 - flashinfer.jit: [Autotuner]: Autotuning process ends
+Capturing CUDA graphs (mixed prefill-decode, PIECEWISE): 100%|██████████| 38/38 [00:08<00:00,  4.43it/s]
+Capturing CUDA graphs (decode, FULL): 100%|██████████| 22/22 [00:02<00:00, 10.91it/s]
+(EngineCore pid=1609) INFO 06-14 17:03:34 [gpu_model_runner.py:5746] Graph capturing finished in 12 secs, took -2.02 GiB
+(EngineCore pid=1609) INFO 06-14 17:03:34 [gpu_worker.py:617] CUDA graph pool memory: -2.02 GiB (actual), 0.26 GiB (estimated), difference: 2.28 GiB (244947353600.0%).
+(EngineCore pid=1609) INFO 06-14 17:03:34 [core.py:281] init engine (profile, create kv cache, warmup model) took 83.49 seconds
+INFO 06-14 17:03:35 [llm.py:391] Supported tasks: ['generate']
+
+train: vLLM batches: 100%
+ 16/16 [3:01:02<00:00, 751.37s/it, processed=1585]
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 1295.67it/s]
+WARNING 06-14 17:08:22 [input_processor.py:141] vLLM has deprecated support for supporting different tokenizers for different LoRAs. By default, vLLM uses base model's tokenizer. If you are using a LoRA with its own tokenizer, consider specifying `--tokenizer [lora_path]` to use the LoRA tokenizer.
+Processed prompts: 100%
+ 400/400 [13:20<00:00,  1.91s/it, est. speed input: 64.02 toks/s, output: 1249.16 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:02<00:00, 40341.13 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.61ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 3500.50it/s]
+Processed prompts: 100%
+ 400/400 [10:23<00:00,  3.49s/it, est. speed input: 84.36 toks/s, output: 1477.94 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:02<00:00, 46567.28 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.65ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 3347.33it/s]
+Processed prompts: 100%
+ 400/400 [11:59<00:00,  4.03s/it, est. speed input: 77.45 toks/s, output: 1452.23 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:02<00:00, 63006.08 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.65ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 3470.70it/s]
+Processed prompts: 100%
+ 400/400 [10:36<00:00,  2.49s/it, est. speed input: 81.74 toks/s, output: 1477.54 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:02<00:00, 58428.53 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.60ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 3465.28it/s]
+Processed prompts: 100%
+ 400/400 [10:30<00:00,  2.12s/it, est. speed input: 79.76 toks/s, output: 1465.70 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:02<00:00, 64356.27 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.60ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 3574.40it/s]
+Processed prompts: 100%
+ 400/400 [09:36<00:00,  1.94s/it, est. speed input: 89.95 toks/s, output: 1558.46 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:02<00:00, 54021.59 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.61ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 3506.06it/s]
+Processed prompts: 100%
+ 400/400 [11:08<00:00,  3.48s/it, est. speed input: 75.36 toks/s, output: 1425.99 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:03<00:00, 42792.35 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.52ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 3680.99it/s]
+Processed prompts: 100%
+ 400/400 [09:03<00:00,  2.08s/it, est. speed input: 86.64 toks/s, output: 1454.29 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:01<00:00, 69121.02 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.56ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 3504.86it/s]
+Processed prompts: 100%
+ 400/400 [09:56<00:00,  3.14s/it, est. speed input: 83.83 toks/s, output: 1422.40 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:01<00:00, 71896.33 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.52ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 3447.22it/s]
+Processed prompts: 100%
+ 400/400 [11:12<00:00,  2.82s/it, est. speed input: 76.06 toks/s, output: 1494.11 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:01<00:00, 67207.08 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.49ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 3334.77it/s]
+Processed prompts: 100%
+ 400/400 [11:56<00:00,  4.08s/it, est. speed input: 74.58 toks/s, output: 1450.01 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:01<00:00, 70015.52 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.46ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 3434.46it/s]
+Processed prompts: 100%
+ 400/400 [10:41<00:00,  1.66s/it, est. speed input: 80.20 toks/s, output: 1485.65 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:01<00:00, 67637.76 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.45ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 3396.36it/s]
+Processed prompts: 100%
+ 400/400 [11:46<00:00,  2.17s/it, est. speed input: 74.20 toks/s, output: 1434.26 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:01<00:00, 64324.96 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.46ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 3383.65it/s]
+Processed prompts: 100%
+ 400/400 [11:00<00:00,  2.46s/it, est. speed input: 77.89 toks/s, output: 1495.65 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:01<00:00, 68000.62 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.43ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 3292.85it/s]
+Processed prompts: 100%
+ 400/400 [11:47<00:00,  2.59s/it, est. speed input: 75.29 toks/s, output: 1429.57 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:01<00:00, 61770.50 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.45ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 85/85 [00:00<00:00, 2768.65it/s]
+Processed prompts: 100%
+ 340/340 [15:11<00:00,  3.04s/it, est. speed input: 66.19 toks/s, output: 1561.94 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:02<00:00, 46422.95 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.39ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+validation: vLLM batches: 100%
+ 1/1 [02:49<00:00, 169.75s/it, processed=55]
+Rendering prompts: 100%
+ 55/55 [00:00<00:00, 2492.00it/s]
+Processed prompts: 100%
+ 220/220 [02:49<00:00,  2.39s/it, est. speed input: 241.94 toks/s, output: 694.99 toks/s]
+validation: apply generated preferences (num_proc=8): 100%
+ 687/687 [00:00<00:00, 415.08 examples/s]
+Creating parquet from Arrow format: 100%
+ 1/1 [00:00<00:00, 127.00ba/s]
+validation: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/validation.parquet
+
+Saving the dataset (8/8 shards): 100%
+ 78868/78868 [00:00<00:00, 119713.85 examples/s]
+Saving the dataset (8/8 shards): 100%
+ 687/687 [00:00<00:00, 372.15 examples/s]
+Saving the dataset (8/8 shards): 100%
+ 687/687 [00:00<00:00, 370.04 examples/s]
+Saved updated dataset to /kaggle/working/nemotron-reasoning
+
+Dataset loaded from /kaggle/working/nemotron-reasoning
+Setting num_proc from 1 back to 1 for the train split to disable multiprocessing as it only contains one shard.
+Uploading the dataset shards: 100%
+ 1/1 [37:46<00:00,  4.64s/ shards]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  2.25ba/s]
+Processing Files (1 / 1): 100%
+ 73.8MB / 73.8MB, 28.4MB/s  
+New Data Upload: 100%
+ 70.9MB / 70.9MB, 27.3MB/s  
+Setting num_proc from 1 back to 1 for the validation split to disable multiprocessing as it only contains one shard.
+Uploading the dataset shards: 100%
+ 1/1 [00:03<00:00,  1.67s/ shards]
+Creating parquet from Arrow format: 100%
+ 1/1 [00:00<00:00, 47.54ba/s]
+Processing Files (1 / 1): 100%
+  686kB /  686kB,  324kB/s  
+New Data Upload: 100%
+  667kB /  667kB,  324kB/s  
+Setting num_proc from 1 back to 1 for the test split to disable multiprocessing as it only contains one shard.
+Uploading the dataset shards: 100%
+ 1/1 [00:02<00:00,  1.18 shards/s]
+Creating parquet from Arrow format: 100%
+ 1/1 [00:00<00:00, 48.50ba/s]
+Processing Files (1 / 1): 100%
+  634kB /  634kB,  652kB/s  
+New Data Upload: 100%
+  261kB /  261kB,  652kB/s  
+Upload to Hugging Face succeeded
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  2.44ba/s]
+Creating parquet from Arrow format: 100%
+ 1/1 [00:00<00:00, 46.22ba/s]
+Creating parquet from Arrow format: 100%
+ 1/1 [00:00<00:00, 48.73ba/s]
+Uploading Dataset https://api.kaggle.com/datasets/rohitraje0493/nemotron-reasoning ...
+Starting upload for file /kaggle/working/nemotron-reasoning-kaggle/test.parquet
+Warning: Looks like you're using an outdated `kagglehub` version (installed: 1.0.0), please consider upgrading to the latest version (1.0.2)
+
+Uploading: 100%|██████████| 634k/634k [00:00<00:00, 1.47MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning-kaggle/test.parquet (619KB)
+Starting upload for file /kaggle/working/nemotron-reasoning-kaggle/validation.parquet
+
+
+Uploading: 100%|██████████| 686k/686k [00:00<00:00, 1.71MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning-kaggle/validation.parquet (670KB)
+Starting upload for file /kaggle/working/nemotron-reasoning-kaggle/train.parquet
+
+
+Uploading:   0%|          | 0.00/73.8M [00:00<?, ?B/s]
+Uploading:   1%|▏         | 1.10M/73.8M [00:00<00:07, 10.3MB/s]
+Uploading:  28%|██▊       | 20.9M/73.8M [00:00<00:00, 117MB/s] 
+Uploading:  44%|████▍     | 32.8M/73.8M [00:00<00:00, 74.9MB/s]
+Uploading:  66%|██████▌   | 48.9M/73.8M [00:00<00:00, 92.8MB/s]
+Uploading:  80%|████████  | 59.3M/73.8M [00:00<00:00, 83.9MB/s]
+Uploading: 100%|██████████| 73.8M/73.8M [00:01<00:00, 54.2MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning-kaggle/train.parquet (70MB)
+
+Your dataset version has been created.
+Files are being processed...
+See at: https://api.kaggle.com/datasets/rohitraje0493/nemotron-reasoning
+Dataset loaded from /kaggle/working/nemotron-reasoning
+Uploading Dataset https://api.kaggle.com/datasets/rohitraje0493/nemotron-reasoning-kaggle ...
+Starting upload for file /kaggle/working/nemotron-reasoning-backups/train.csv
+Uploading: 100%|██████████| 32.6M/32.6M [00:01<00:00, 29.3MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning-backups/train.csv (31MB)
+Starting upload for file /kaggle/working/nemotron-reasoning-backups/validation.csv
+
+Uploading: 100%|██████████| 571k/571k [00:00<00:00, 826kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning-backups/validation.csv (557KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/dataset_dict.json
+
+Uploading: 100%|██████████| 43.0/43.0 [00:00<00:00, 65.7B/s]
+Upload successful: /kaggle/working/nemotron-reasoning/dataset_dict.json (43B)
+Starting upload for file /kaggle/working/nemotron-reasoning/train/dataset_info.json
+
+Uploading: 100%|██████████| 2.26k/2.26k [00:00<00:00, 3.17kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/train/dataset_info.json (2KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/train/data-00000-of-00008.arrow
+
+Uploading: 100%|██████████| 22.6M/22.6M [00:01<00:00, 19.8MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/train/data-00000-of-00008.arrow (22MB)
+Starting upload for file /kaggle/working/nemotron-reasoning/train/data-00002-of-00008.arrow
+
+Uploading: 100%|██████████| 21.9M/21.9M [00:01<00:00, 19.4MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/train/data-00002-of-00008.arrow (21MB)
+Starting upload for file /kaggle/working/nemotron-reasoning/train/data-00004-of-00008.arrow
+
+Uploading: 100%|██████████| 19.0M/19.0M [00:01<00:00, 18.3MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/train/data-00004-of-00008.arrow (18MB)
+Starting upload for file /kaggle/working/nemotron-reasoning/train/data-00007-of-00008.arrow
+
+Uploading: 100%|██████████| 19.1M/19.1M [00:01<00:00, 16.3MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/train/data-00007-of-00008.arrow (18MB)
+Starting upload for file /kaggle/working/nemotron-reasoning/train/state.json
+
+Uploading: 100%|██████████| 660/660 [00:00<00:00, 1.01kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/train/state.json (660B)
+Starting upload for file /kaggle/working/nemotron-reasoning/train/data-00003-of-00008.arrow
+
+Uploading: 100%|██████████| 20.6M/20.6M [00:01<00:00, 18.6MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/train/data-00003-of-00008.arrow (20MB)
+Starting upload for file /kaggle/working/nemotron-reasoning/train/data-00001-of-00008.arrow
+
+Uploading: 100%|██████████| 21.5M/21.5M [00:01<00:00, 21.2MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/train/data-00001-of-00008.arrow (21MB)
+Starting upload for file /kaggle/working/nemotron-reasoning/train/data-00005-of-00008.arrow
+
+Uploading: 100%|██████████| 19.2M/19.2M [00:01<00:00, 17.5MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/train/data-00005-of-00008.arrow (18MB)
+Starting upload for file /kaggle/working/nemotron-reasoning/train/data-00006-of-00008.arrow
+
+Uploading: 100%|██████████| 18.9M/18.9M [00:01<00:00, 16.7MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/train/data-00006-of-00008.arrow (18MB)
+Starting upload for file /kaggle/working/nemotron-reasoning/validation/dataset_info.json
+
+Uploading: 100%|██████████| 2.26k/2.26k [00:00<00:00, 3.62kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/validation/dataset_info.json (2KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/validation/data-00000-of-00008.arrow
+
+Uploading: 100%|██████████| 295k/295k [00:00<00:00, 462kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/validation/data-00000-of-00008.arrow (288KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/validation/data-00002-of-00008.arrow
+
+Uploading: 100%|██████████| 204k/204k [00:00<00:00, 294kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/validation/data-00002-of-00008.arrow (199KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/validation/data-00004-of-00008.arrow
+
+Uploading: 100%|██████████| 157k/157k [00:00<00:00, 223kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/validation/data-00004-of-00008.arrow (153KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/validation/data-00007-of-00008.arrow
+
+Uploading: 100%|██████████| 148k/148k [00:00<00:00, 232kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/validation/data-00007-of-00008.arrow (144KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/validation/state.json
+
+Uploading: 100%|██████████| 660/660 [00:00<00:00, 927B/s]
+Upload successful: /kaggle/working/nemotron-reasoning/validation/state.json (660B)
+Starting upload for file /kaggle/working/nemotron-reasoning/validation/data-00003-of-00008.arrow
+
+Uploading: 100%|██████████| 180k/180k [00:00<00:00, 275kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/validation/data-00003-of-00008.arrow (176KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/validation/data-00001-of-00008.arrow
+
+Uploading: 100%|██████████| 176k/176k [00:00<00:00, 249kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/validation/data-00001-of-00008.arrow (172KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/validation/data-00005-of-00008.arrow
+
+Uploading: 100%|██████████| 165k/165k [00:00<00:00, 216kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/validation/data-00005-of-00008.arrow (161KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/validation/data-00006-of-00008.arrow
+
+Uploading: 100%|██████████| 151k/151k [00:00<00:00, 231kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/validation/data-00006-of-00008.arrow (148KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/test/dataset_info.json
+
+Uploading: 100%|██████████| 2.26k/2.26k [00:00<00:00, 3.41kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/test/dataset_info.json (2KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/test/data-00000-of-00008.arrow
+
+Uploading: 100%|██████████| 175k/175k [00:00<00:00, 211kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/test/data-00000-of-00008.arrow (170KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/test/data-00002-of-00008.arrow
+
+Uploading: 100%|██████████| 174k/174k [00:00<00:00, 266kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/test/data-00002-of-00008.arrow (170KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/test/data-00004-of-00008.arrow
+
+Uploading: 100%|██████████| 165k/165k [00:00<00:00, 239kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/test/data-00004-of-00008.arrow (161KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/test/data-00007-of-00008.arrow
+
+Uploading: 100%|██████████| 148k/148k [00:00<00:00, 219kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/test/data-00007-of-00008.arrow (145KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/test/state.json
+
+Uploading: 100%|██████████| 660/660 [00:00<00:00, 973B/s]
+Upload successful: /kaggle/working/nemotron-reasoning/test/state.json (660B)
+Starting upload for file /kaggle/working/nemotron-reasoning/test/data-00003-of-00008.arrow
+
+Uploading: 100%|██████████| 176k/176k [00:00<00:00, 267kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/test/data-00003-of-00008.arrow (172KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/test/data-00001-of-00008.arrow
+
+Uploading: 100%|██████████| 152k/152k [00:00<00:00, 229kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/test/data-00001-of-00008.arrow (149KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/test/data-00005-of-00008.arrow
+
+Uploading: 100%|██████████| 152k/152k [00:00<00:00, 222kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/test/data-00005-of-00008.arrow (148KB)
+Starting upload for file /kaggle/working/nemotron-reasoning/test/data-00006-of-00008.arrow
+
+Uploading: 100%|██████████| 157k/157k [00:00<00:00, 215kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning/test/data-00006-of-00008.arrow (153KB)
+Starting upload for file /kaggle/working/nemotron-reasoning-kaggle/train.parquet
+
+Uploading: 100%|██████████| 73.8M/73.8M [00:01<00:00, 40.9MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning-kaggle/train.parquet (70MB)
+Starting upload for file /kaggle/working/nemotron-reasoning-kaggle/test.parquet
+
+Uploading: 100%|██████████| 634k/634k [00:00<00:00, 932kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning-kaggle/test.parquet (619KB)
+Starting upload for file /kaggle/working/nemotron-reasoning-kaggle/validation.parquet
+
+Uploading: 100%|██████████| 686k/686k [00:00<00:00, 1.03MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning-kaggle/validation.parquet (670KB)
+Starting upload for file /kaggle/working/.virtual_documents/__notebook_source__.ipynb
+
+Uploading: 100%|██████████| 45.4k/45.4k [00:00<00:00, 69.8kB/s]
+Upload successful: /kaggle/working/.virtual_documents/__notebook_source__.ipynb (44KB)
+Starting upload for file /kaggle/working/nemotron-reasoning-incremental/train.parquet
+
+Uploading: 100%|██████████| 73.8M/73.8M [00:02<00:00, 34.7MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning-incremental/train.parquet (70MB)
+Starting upload for file /kaggle/working/nemotron-reasoning-incremental/validation.parquet
+
+Uploading: 100%|██████████| 686k/686k [00:00<00:00, 987kB/s]
+Upload successful: /kaggle/working/nemotron-reasoning-incremental/validation.parquet (670KB)
+
+Your dataset has been created.
+Files are being processed...
+See at: https://api.kaggle.com/datasets/rohitraje0493/nemotron-reasoning-kaggle
+Upload to Kaggle succeeded
+
+train: find non-empty `chosen` and `rejected`: 100%
+ 78868/78868 [00:01<00:00, 61115.55 examples/s]
+train: find non-empty `chosen` only`: 100%
+ 78868/78868 [00:01<00:00, 60524.25 examples/s]
+train: find non-empty `rejected` only: 100%
+ 78868/78868 [00:01<00:00, 60165.03 examples/s]
+train: Chosen and Rejected = 87, Chosen Only = 1000, Rejected Only = 498
+validation: find non-empty `chosen` and `rejected`: 100%
+ 687/687 [00:00<00:00, 18839.53 examples/s]
+validation: find non-empty `chosen` only`: 100%
+ 687/687 [00:00<00:00, 21912.95 examples/s]
+validation: find non-empty `rejected` only: 100%
+ 687/687 [00:00<00:00, 23642.19 examples/s]
+validation: Chosen and Rejected = 29, Chosen Only = 21, Rejected Only = 5
+test: find non-empty `chosen` and `rejected`: 100%
+ 687/687 [00:00<00:00, 23111.24 examples/s]
+test: find non-empty `chosen` only`: 100%
+ 687/687 [00:00<00:00, 26666.11 examples/s]
+test: find non-empty `rejected` only: 100%
+ 687/687 [00:00<00:00, 24055.29 examples/s]
+test: Chosen and Rejected = 0, Chosen Only = 0, Rejected Only = 0
+
+---------------------------
+
+train: initialize DPO columns (num_proc=8): 100%
+ 78868/78868 [00:01<00:00, 65458.81 examples/s]
+validation: initialize DPO columns (num_proc=8): 100%
+ 687/687 [00:00<00:00, 843.57 examples/s]
+test: initialize DPO columns (num_proc=8): 100%
+ 687/687 [00:00<00:00, 1570.69 examples/s]
+
+train: candidate source order=['nvidia-nemotron-model-reasoning-challenge', 'dgxchen/nemotron-cot-tong', 'qwedsacf/competition_math', 'open-r1/OpenR1-Math-220k', 'EleutherAI/drop', 'tasksource/proofwriter', 'AI-MO/NuminaMath-1.5', 'openai/gsm8k', 'yale-nlp/FOLIO', 'BytedTsinghua-SIA/Enigmata-Eval', 'nvidia/OpenMathReasoning', 'WildEval/ZebraLogic', 'EleutherAI/asdiv', 'renma/ProntoQA', 'ChilleD/SVAMP']
+train: missing HQ filter retained 23,197/30,910 candidates
+train: existing HQ filter retained 36,748/46,373 candidates
+train: selected missing range [1,500, 2,000) (500 rows)
+train: selected existing range [85, 114) (29 rows)
+train: candidate source order=['nvidia-nemotron-model-reasoning-challenge', 'dgxchen/nemotron-cot-tong', 'EleutherAI/drop']
+train: mark finalized candidates (num_proc=8): 100%
+ 78868/78868 [00:01<00:00, 72907.34 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.38ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+train: candidates=529/77,283 (missing=500/23,197, existing=29/36,748)
+validation: missing HQ filter retained 108/182 candidates
+validation: existing HQ filter retained 344/450 candidates
+validation: selected missing range [0, 0) (0 rows)
+validation: selected existing range [0, 0) (0 rows)
+validation: candidates=0/632 (missing=0/108, existing=0/344)
+test: missing HQ filter retained 154/232 candidates
+test: existing HQ filter retained 359/455 candidates
+test: selected missing range [0, 0) (0 rows)
+test: selected existing range [0, 0) (0 rows)
+test: candidates=0/687 (missing=0/154, existing=0/359)
+
+2026-06-14 22:19:17.256363: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1781475557.265490    3403 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1781475557.268365    3403 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1781475557.275061    3403 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1781475557.275070    3403 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1781475557.275071    3403 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1781475557.275072    3403 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+INFO 06-14 22:19:19 [utils.py:233] non-default args: {'trust_remote_code': True, 'seed': 3407, 'max_model_len': 8192, 'enable_prefix_caching': True, 'gpu_memory_utilization': 0.95, 'max_num_seqs': 64, 'disable_log_stats': True, 'enable_lora': True, 'max_lora_rank': 32, 'enable_chunked_prefill': True, 'model': '/kaggle/input/models/metric/nemotron-3-nano-30b-a3b-bf16/transformers/default/1'}
+INFO 06-14 22:19:20 [model.py:533] Resolved architecture: NemotronHForCausalLM
+INFO 06-14 22:19:20 [model.py:1582] Using max model len 8192
+INFO 06-14 22:19:20 [scheduler.py:231] Chunked prefill is enabled with max_num_batched_tokens=16384.
+INFO 06-14 22:19:20 [config.py:427] Updating mamba_ssm_cache_dtype to 'float32' for NemotronH model
+WARNING 06-14 22:19:20 [config.py:372] Mamba cache mode is set to 'all' for NemotronHForCausalLM by default when prefix caching is enabled
+INFO 06-14 22:19:20 [config.py:392] Warning: Prefix caching in Mamba cache 'all' mode is currently enabled. Its support for Mamba layers is experimental. Please report any issues you may observe.
+INFO 06-14 22:19:20 [config.py:212] Setting attention block size to 2176 tokens to ensure that attention page size is >= mamba page size.
+INFO 06-14 22:19:20 [config.py:243] Padding mamba page size by 4.41% to ensure that mamba page size and attention page size are exactly equal.
+INFO 06-14 22:19:20 [vllm.py:754] Asynchronous scheduling is enabled.
+(EngineCore pid=3913) INFO 06-14 22:19:20 [core.py:103] Initializing a V1 LLM engine (v0.18.0) with config: model='/kaggle/input/models/metric/nemotron-3-nano-30b-a3b-bf16/transformers/default/1', speculative_config=None, tokenizer='/kaggle/input/models/metric/nemotron-3-nano-30b-a3b-bf16/transformers/default/1', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.bfloat16, max_seq_len=8192, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=False, quantization=None, enforce_eager=False, enable_return_routed_experts=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False), seed=3407, served_model_name=/kaggle/input/models/metric/nemotron-3-nano-30b-a3b-bf16/transformers/default/1, enable_prefix_caching=True, enable_chunked_prefill=True, pooler_config=None, compilation_config={'mode': <CompilationMode.VLLM_COMPILE: 3>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['none'], 'splitting_ops': ['vllm::unified_attention', 'vllm::unified_attention_with_output', 'vllm::unified_mla_attention', 'vllm::unified_mla_attention_with_output', 'vllm::mamba_mixer2', 'vllm::mamba_mixer', 'vllm::short_conv', 'vllm::linear_attention', 'vllm::plamo2_mamba_mixer', 'vllm::gdn_attention_core', 'vllm::olmo_hybrid_gdn_full_forward', 'vllm::kda_attention', 'vllm::sparse_attn_indexer', 'vllm::rocm_aiter_sparse_attn_indexer', 'vllm::unified_kv_cache_update', 'vllm::unified_mla_kv_cache_update'], 'compile_mm_encoder': False, 'compile_sizes': [], 'compile_ranges_endpoints': [16384], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.FULL_AND_PIECEWISE: (2, 1)>, 'cudagraph_num_of_warmups': 1, 'cudagraph_capture_sizes': [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': False, 'fuse_act_quant': False, 'fuse_attn_quant': False, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_allreduce_rms': False}, 'max_cudagraph_capture_size': 128, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': True, 'static_all_moe_layers': []}
+(EngineCore pid=3913) INFO 06-14 22:19:21 [parallel_state.py:1395] world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://172.19.2.2:48485 backend=nccl
+(EngineCore pid=3913) INFO 06-14 22:19:21 [parallel_state.py:1717] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, EP rank 0, EPLB rank N/A
+[W614 22:19:21.453374520 socket.cpp:207] [c10d] The hostname of the client socket cannot be retrieved. err=-3
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+(EngineCore pid=3913) INFO 06-14 22:19:21 [gpu_model_runner.py:4481] Starting to load model /kaggle/input/models/metric/nemotron-3-nano-30b-a3b-bf16/transformers/default/1...
+(EngineCore pid=3913) INFO 06-14 22:19:22 [unquantized.py:186] Using TRITON backend for Unquantized MoE
+(EngineCore pid=3913) INFO 06-14 22:19:22 [cuda.py:317] Using FLASH_ATTN attention backend out of potential backends: ['FLASH_ATTN', 'FLASHINFER', 'TRITON_ATTN', 'FLEX_ATTENTION'].
+(EngineCore pid=3913) INFO 06-14 22:19:22 [flash_attn.py:598] Using FlashAttention version 2
+(EngineCore pid=3913) <frozen importlib._bootstrap_external>:1301: FutureWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+(EngineCore pid=3913) <frozen importlib._bootstrap_external>:1301: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+Loading safetensors checkpoint shards: 100% Completed | 13/13 [00:06<00:00,  2.07it/s]
+(EngineCore pid=3913) INFO 06-14 22:19:29 [default_loader.py:384] Loading weights took 6.40 seconds
+(EngineCore pid=3913) INFO 06-14 22:19:29 [utils.py:98] MoE model detected. Using fused MoE LoRA implementation.
+(EngineCore pid=3913) INFO 06-14 22:19:29 [punica_selector.py:20] Using PunicaWrapperGPU.
+(EngineCore pid=3913) INFO 06-14 22:19:30 [gpu_model_runner.py:4566] Model loading took 60.64 GiB memory and 6.762820 seconds
+(EngineCore pid=3913) INFO 06-14 22:19:31 [backends.py:988] Using cache directory: /root/.cache/vllm/torch_compile_cache/ba002cdf8e/rank_0_0/backbone for vLLM's torch.compile
+(EngineCore pid=3913) INFO 06-14 22:19:31 [backends.py:1048] Dynamo bytecode transform time: 0.88 s
+(EngineCore pid=3913) INFO 06-14 22:19:32 [backends.py:284] Directly load the compiled graph(s) for compile range (1, 16384) from the cache, took 0.878 s
+(EngineCore pid=3913) INFO 06-14 22:19:32 [monitor.py:48] torch.compile took 1.92 s in total
+(EngineCore pid=3913) INFO 06-14 22:19:32 [decorators.py:296] Directly load AOT compilation from path /root/.cache/vllm/torch_compile_cache/torch_aot_compile/1f7dc0a82199e0f76679e689caf48ca505bd930cc780afc023dea055ac604f5c/rank_0_0/model
+(EngineCore pid=3913) WARNING 06-14 22:19:33 [fused_moe.py:1093] Using default MoE config. Performance might be sub-optimal! Config file not found at /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/fused_moe/configs/E=128,N=1856,device_name=NVIDIA_RTX_PRO_6000_Blackwell_Server_Edition.json
+(EngineCore pid=3913) INFO 06-14 22:19:35 [monitor.py:76] Initial profiling/warmup run took 2.31 s
+(EngineCore pid=3913) WARNING 06-14 22:19:39 [kv_cache_utils.py:1056] Add 1 padding layers, may waste at most 4.35% KV cache memory
+(EngineCore pid=3913) INFO 06-14 22:19:39 [kv_cache_utils.py:826] Overriding num_gpu_blocks=0 with num_gpu_blocks_override=128
+(EngineCore pid=3913) INFO 06-14 22:19:39 [gpu_model_runner.py:5607] Profiling CUDA graph memory: PIECEWISE=38 (largest=128), FULL=22 (largest=64)
+(EngineCore pid=3913) WARNING 06-14 22:19:39 [utils.py:268] Using default LoRA kernel configs
+(EngineCore pid=3913) INFO 06-14 22:19:45 [gpu_model_runner.py:5686] Estimated CUDA graph memory: 0.26 GiB total
+(EngineCore pid=3913) INFO 06-14 22:19:46 [gpu_worker.py:456] Available KV cache memory: 21.35 GiB
+(EngineCore pid=3913) INFO 06-14 22:19:46 [gpu_worker.py:490] In v0.19, CUDA graph memory profiling will be enabled by default (VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1), which more accurately accounts for CUDA graph memory during KV cache allocation. To try it now, set VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 and increase --gpu-memory-utilization from 0.9500 to 0.9527 to maintain the same effective KV cache size.
+(EngineCore pid=3913) WARNING 06-14 22:19:46 [kv_cache_utils.py:1056] Add 1 padding layers, may waste at most 4.35% KV cache memory
+(EngineCore pid=3913) INFO 06-14 22:19:46 [kv_cache_utils.py:1316] GPU KV cache size: 744,192 tokens
+(EngineCore pid=3913) INFO 06-14 22:19:46 [kv_cache_utils.py:1321] Maximum concurrency for 8,192 tokens per request: 85.70x
+(EngineCore pid=3913) 2026-06-14 22:19:46,315 - INFO - autotuner.py:262 - flashinfer.jit: [Autotuner]: Autotuning process starts ...
+(EngineCore pid=3913) 2026-06-14 22:19:46,475 - INFO - autotuner.py:268 - flashinfer.jit: [Autotuner]: Autotuning process ends
+Capturing CUDA graphs (mixed prefill-decode, PIECEWISE): 100%|██████████| 38/38 [00:08<00:00,  4.46it/s]
+Capturing CUDA graphs (decode, FULL): 100%|██████████| 22/22 [00:02<00:00, 10.75it/s]
+(EngineCore pid=3913) INFO 06-14 22:19:58 [gpu_model_runner.py:5746] Graph capturing finished in 12 secs, took -2.30 GiB
+(EngineCore pid=3913) INFO 06-14 22:19:58 [gpu_worker.py:617] CUDA graph pool memory: -2.3 GiB (actual), 0.26 GiB (estimated), difference: 2.56 GiB (274726912000.0%).
+(EngineCore pid=3913) INFO 06-14 22:19:58 [core.py:281] init engine (profile, create kv cache, warmup model) took 28.30 seconds
+INFO 06-14 22:19:59 [llm.py:391] Supported tasks: ['generate']
+
+train: vLLM batches: 100%
+ 6/6 [46:20<00:00, 336.49s/it, processed=2114]
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 2178.79it/s]
+WARNING 06-14 22:19:59 [input_processor.py:141] vLLM has deprecated support for supporting different tokenizers for different LoRAs. By default, vLLM uses base model's tokenizer. If you are using a LoRA with its own tokenizer, consider specifying `--tokenizer [lora_path]` to use the LoRA tokenizer.
+Processed prompts: 100%
+ 400/400 [11:13<00:00,  2.40s/it, est. speed input: 76.01 toks/s, output: 1368.89 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:02<00:00, 52242.04 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.36ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 2393.87it/s]
+Processed prompts: 100%
+ 400/400 [10:58<00:00,  2.30s/it, est. speed input: 79.96 toks/s, output: 1480.85 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:02<00:00, 47758.45 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.31ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 3559.20it/s]
+Processed prompts: 100%
+ 400/400 [09:35<00:00,  1.95s/it, est. speed input: 84.55 toks/s, output: 1422.95 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:02<00:00, 61148.55 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.30ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 2933.51it/s]
+Processed prompts: 100%
+ 400/400 [09:05<00:00,  1.92s/it, est. speed input: 126.49 toks/s, output: 1345.54 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:02<00:00, 66704.53 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.28ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 100/100 [00:00<00:00, 2408.89it/s]
+Processed prompts: 100%
+ 400/400 [03:31<00:00,  1.33s/it, est. speed input: 430.96 toks/s, output: 782.83 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:03<00:00, 39509.10 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.27ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+Rendering prompts: 100%
+ 29/29 [00:00<00:00, 2006.91it/s]
+Processed prompts: 100%
+ 116/116 [01:36<00:00,  3.46s/it, est. speed input: 265.78 toks/s, output: 440.97 toks/s]
+train: apply generated preferences (num_proc=8): 100%
+ 78868/78868 [00:01<00:00, 66737.21 examples/s]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  5.29ba/s]
+train: persisted incremental snapshot to /kaggle/working/nemotron-reasoning-incremental/train.parquet
+
+Saving the dataset (8/8 shards): 100%
+ 78868/78868 [00:00<00:00, 111499.02 examples/s]
+Saving the dataset (8/8 shards): 100%
+ 687/687 [00:00<00:00, 400.88 examples/s]
+Saving the dataset (8/8 shards): 100%
+ 687/687 [00:00<00:00, 396.90 examples/s]
+Saved updated dataset to /kaggle/working/nemotron-reasoning
+DatasetDict({
+    train: Dataset({
+        features: ['id', 'source', 'domain', 'prompt', 'reasoning', 'response', 'final_answer', 'answer_type', 'difficulty', 'chosen', 'rejected', 'dpo_row_index', 'dpo_selected', 'dpo_processed'],
+        num_rows: 78868
+    })
+    validation: Dataset({
+        features: ['id', 'source', 'domain', 'prompt', 'reasoning', 'response', 'final_answer', 'answer_type', 'difficulty', 'chosen', 'rejected', 'dpo_row_index', 'dpo_selected', 'dpo_processed'],
+        num_rows: 687
+    })
+    test: Dataset({
+        features: ['id', 'source', 'domain', 'prompt', 'reasoning', 'response', 'final_answer', 'answer_type', 'difficulty', 'chosen', 'rejected', 'dpo_row_index', 'dpo_selected', 'dpo_processed'],
+        num_rows: 687
+    })
+})
+
+train: find non-empty `chosen` and `rejected`: 100%
+ 78868/78868 [00:00<00:00, 170430.38 examples/s]
+train: find non-empty `chosen` only`: 100%
+ 78868/78868 [00:00<00:00, 169705.31 examples/s]
+train: find non-empty `rejected` only: 100%
+ 78868/78868 [00:00<00:00, 170380.91 examples/s]
+train: Chosen and Rejected = 175, Chosen Only = 1314, Rejected Only = 625
+validation: find non-empty `chosen` and `rejected`: 100%
+ 687/687 [00:00<00:00, 76739.38 examples/s]
+validation: find non-empty `chosen` only`: 100%
+ 687/687 [00:00<00:00, 80019.07 examples/s]
+validation: find non-empty `rejected` only: 100%
+ 687/687 [00:00<00:00, 82250.65 examples/s]
+validation: Chosen and Rejected = 29, Chosen Only = 21, Rejected Only = 5
+test: find non-empty `chosen` and `rejected`: 100%
+ 687/687 [00:00<00:00, 82252.99 examples/s]
+test: find non-empty `chosen` only`: 100%
+ 687/687 [00:00<00:00, 85483.77 examples/s]
+test: find non-empty `rejected` only: 100%
+ 687/687 [00:00<00:00, 85514.21 examples/s]
+test: Chosen and Rejected = 0, Chosen Only = 0, Rejected Only = 0
+
+Dataset loaded from /kaggle/working/nemotron-reasoning
+Setting num_proc from 1 back to 1 for the train split to disable multiprocessing as it only contains one shard.
+Uploading the dataset shards: 100%
+ 1/1 [00:03<00:00,  3.21s/ shards]
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  2.26ba/s]
+Processing Files (1 / 1): 100%
+ 74.7MB / 74.7MB, 62.2MB/s  
+New Data Upload: 100%
+ 8.84MB / 8.84MB, 7.37MB/s  
+Setting num_proc from 1 back to 1 for the validation split to disable multiprocessing as it only contains one shard.
+Uploading the dataset shards: 100%
+ 1/1 [00:00<00:00,  1.12 shards/s]
+Creating parquet from Arrow format: 100%
+ 1/1 [00:00<00:00, 47.44ba/s]
+Processing Files (1 / 1): 100%
+  686kB /  686kB,  324kB/s  
+New Data Upload: 100%
+  667kB /  667kB,  324kB/s  
+Setting num_proc from 1 back to 1 for the test split to disable multiprocessing as it only contains one shard.
+Uploading the dataset shards: 100%
+ 1/1 [00:02<00:00,  1.14 shards/s]
+Creating parquet from Arrow format: 100%
+ 1/1 [00:00<00:00, 50.49ba/s]
+Processing Files (1 / 1): 100%
+  634kB /  634kB,  0.00B/s  
+New Data Upload: 100%
+  261kB /  261kB,  0.00B/s  
+Upload to Hugging Face succeeded
+Creating parquet from Arrow format: 100%
+ 2/2 [00:00<00:00,  2.40ba/s]
+Creating parquet from Arrow format: 100%
+ 1/1 [00:00<00:00, 49.73ba/s]
+Creating parquet from Arrow format: 100%
+ 1/1 [00:00<00:00, 50.88ba/s]
+Uploading Dataset https://api.kaggle.com/datasets/rohitraje0493/nemotron-reasoning ...
+Starting upload for file /kaggle/working/nemotron-reasoning-kaggle/train.parquet
+Warning: Looks like you're using an outdated `kagglehub` version (installed: 1.0.0), please consider upgrading to the latest version (1.0.2)
+Uploading: 100%|██████████| 74.7M/74.7M [00:01<00:00, 51.8MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning-kaggle/train.parquet (71MB)
+Starting upload for file /kaggle/working/nemotron-reasoning-kaggle/test.parquet
+
+Uploading: 100%|██████████| 634k/634k [00:00<00:00, 1.61MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning-kaggle/test.parquet (619KB)
+Starting upload for file /kaggle/working/nemotron-reasoning-kaggle/validation.parquet
+
+Uploading: 100%|██████████| 686k/686k [00:00<00:00, 1.61MB/s]
+Upload successful: /kaggle/working/nemotron-reasoning-kaggle/validation.parquet (670KB)
+
+Your dataset version has been created.
+Files are being processed...
+See at: https://api.kaggle.com/datasets/rohitraje0493/nemotron-reasoning
+Uploading Dataset https://api.kaggle.com/datasets/rohitraje0493/nemotron-reasoning-kaggle ...
+More than 50 files detected, creating a zip archive...
+Starting upload for file /tmp/tmpzlsei9it/archive.zip
+Uploading: 100%|██████████| 1.34G/1.34G [00:19<00:00, 67.0MB/s]
+Upload successful: /tmp/tmpzlsei9it/archive.zip (1GB)
+
+Your dataset version has been created.
+Files are being processed...
+See at: https://api.kaggle.com/datasets/rohitraje0493/nemotron-reasoning-kaggle
+Upload to Kaggle succeeded
