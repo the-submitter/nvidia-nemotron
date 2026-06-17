@@ -9,7 +9,6 @@ import shutil
 from pathlib import Path
 from typing import Any, Optional
 
-os.environ["UNSLOTH_VLLM_STANDBY"] = "1"
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
 os.environ.setdefault("TRANSFORMERS_NO_FLAX", "1")
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
@@ -39,11 +38,11 @@ wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
 #     "triton>=3.3.0" \
 #     "torchvision==0.25.0+cu128" \
 #     bitsandbytes \
-#     "transformers>=4.56.2,<5.0.0" \
+#     "transformers>=4.56.2" \
 #     "tokenizers>=0.22.0,<=0.23.0" \
-#     "trl>=0.22.2" \
-#     unsloth \
-#     unsloth_zoo \
+#     "trl[vllm]>=0.22.2" \
+#     accelerate \
+#     peft \
 #     --no-index --find-links={wheels_dir}
 # !uv pip install --no-deps "torchcodec==0.10.0+cu128" --no-index --find-links={wheels_dir}
 # !uv pip install \
@@ -58,7 +57,7 @@ wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
 #     rapidfuzz \
 #     "antlr4-python3-runtime==4.11.0" \
 #     --no-index --find-links={wheels_dir}
-# !uv pip install "vllm>=0.12.0,<0.19.0" --no-index --find-links={wheels_dir}
+# # !uv pip install "vllm>=0.12.0,<0.19.0" --no-index --find-links={wheels_dir}
 # !uv pip install "protobuf<6.0.0" --no-index --find-links={wheels_dir}
 
 # %%
@@ -229,8 +228,6 @@ EVAL_STEPS = int(os.environ.get("EVAL_STEPS", str(SAVE_STEPS)))
 SAVE_TOTAL_LIMIT = int(os.environ.get("SAVE_TOTAL_LIMIT", "2"))
 LORA_R = int(os.environ.get("LORA_R", "32"))
 LORA_ALPHA = int(os.environ.get("LORA_ALPHA", "32"))
-MAX_LORA_RANK = int(os.environ.get("MAX_LORA_RANK", "32"))
-
 NUM_GENERATIONS = int(os.environ.get("NUM_GENERATIONS", "4"))
 TEMPERATURE = float(os.environ.get("TEMPERATURE", "1.0"))
 TOP_P = float(os.environ.get("TOP_P", "1.0"))
@@ -240,6 +237,7 @@ GRPO_LOSS_TYPE = os.environ.get("GRPO_LOSS_TYPE", "dr_grpo")
 VLLM_GPU_MEMORY_UTILIZATION = float(
     os.environ.get("VLLM_GPU_MEMORY_UTILIZATION", "0.95")
 )
+QUANTIZATION = os.environ.get("QUANTIZATION", "1").lower() not in {"0", "false", "no"}
 MATH_VERIFY_TIMEOUT_SECONDS = int(
     os.environ.get("MATH_VERIFY_TIMEOUT_SECONDS", "5")
 )
@@ -977,36 +975,67 @@ def prepare_adapter_input_path() -> Optional[str]:
 
 
 def load_model_and_tokenizer():
-    from unsloth import FastLanguageModel
+    import torch
+    from peft import LoraConfig, PeftModel, get_peft_model
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     adapter_input_path = prepare_adapter_input_path()
-    model_source = adapter_input_path or MODEL_PATH
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=model_source,
-        max_seq_length=MAX_SEQ_LENGTH,
-        load_in_4bit=False,
-        load_in_8bit=False,
-        full_finetuning=False,
-        fast_inference=True,
-        max_lora_rank=MAX_LORA_RANK,
+    tokenizer_source = (
+        adapter_input_path
+        if adapter_input_path is not None
+        and (Path(adapter_input_path) / "tokenizer_config.json").exists()
+        else MODEL_PATH
+    )
+    tokenizer = AutoTokenizer.from_pretrained(
+        tokenizer_source,
         trust_remote_code=True,
-        unsloth_force_compile=False,
-        attn_implementation="eager",
         token=HF_KEY,
-        use_gradient_checkpointing="unsloth",
-        gpu_memory_utilization=VLLM_GPU_MEMORY_UTILIZATION,
     )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
 
-    if adapter_input_path is None:
-        model = FastLanguageModel.get_peft_model(
+    model_dtype = (
+        torch.bfloat16
+        if torch.cuda.is_bf16_supported()
+        else torch.float16
+    )
+    bnb_config = None
+    if QUANTIZATION:
+        from transformers import BitsAndBytesConfig
+
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=model_dtype,
+        )
+
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_PATH,
+        dtype=model_dtype,
+        trust_remote_code=True,
+        token=HF_KEY,
+        quantization_config=bnb_config,
+        # attn_implementation=os.environ.get(
+        #     "ATTN_IMPLEMENTATION",
+        #     "eager",
+        # ),
+        low_cpu_mem_usage=False,
+        device_map="auto",
+    )
+    model.config.use_cache = False
+
+    if adapter_input_path is not None:
+        model = PeftModel.from_pretrained(
             model,
+            adapter_input_path,
+            is_trainable=True,
+        )
+    else:
+        lora_config = LoraConfig(
+            task_type="CAUSAL_LM",
             r=LORA_R,
-            finetune_language_layers=True,
-            finetune_attention_modules=True,
-            finetune_mlp_modules=True,
             target_modules=[
                 "q_proj",
                 "k_proj",
@@ -1021,11 +1050,14 @@ def load_model_and_tokenizer():
             lora_alpha=LORA_ALPHA,
             lora_dropout=0,
             bias="none",
-            use_gradient_checkpointing="unsloth",
-            random_state=SEED,
             use_rslora=False,
-            loftq_config=None,
         )
+        model = get_peft_model(model, lora_config)
+
+    model.name_or_path = MODEL_PATH
+    model.config._name_or_path = MODEL_PATH
+    if hasattr(model, "enable_input_require_grads"):
+        model.enable_input_require_grads()
 
     trainable_parameters = sum(
         parameter.numel()
@@ -1034,7 +1066,12 @@ def load_model_and_tokenizer():
     )
     if trainable_parameters == 0:
         raise RuntimeError("GRPO/GSPO model has no trainable parameters")
-    print(f"Trainable adapter parameters: {trainable_parameters:,}")
+    total_parameters = sum(parameter.numel() for parameter in model.parameters())
+    print(
+        f"Trainable adapter parameters: {trainable_parameters:,}/"
+        f"{total_parameters:,} "
+        f"({100 * trainable_parameters / total_parameters:.4f}%)"
+    )
     return model, tokenizer
 
 
@@ -1055,13 +1092,6 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 ADAPTER_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Unsloth VLLM disable flashinfer
-# os.environ["VLLM_DISABLE_FLASHINFER"] = "1"
-# os.environ["VLLM_ATTENTION_BACKEND"] = "FLASH_ATTN"
-os.environ["UNSLOTH_VLLM_NO_FLASHINFER"] = "1"
-
-from unsloth import FastLanguageModel  # noqa: F401
-
 import torch
 from trl import GRPOConfig, GRPOTrainer
 
@@ -1069,7 +1099,13 @@ if not torch.cuda.is_available():
     raise RuntimeError("GRPO/GSPO training requires a CUDA GPU")
 
 # %%
-# Unsloth VLLM Patch
+model, tokenizer = load_model_and_tokenizer()
+
+# %%
+train_dataset, eval_dataset = prepare_datasets()
+
+# %%
+# TRL VLLM Patch
 
 import inspect
 import functools
@@ -1079,10 +1115,15 @@ from vllm import LLM
 def overwrite_engine_args(original_func):
     # Capture the original function's true signature object
     original_sig = inspect.signature(original_func)
-
+    
     @functools.wraps(original_func)
     def wrapper(*args, **kwargs):
         kwargs["trust_remote_code"] = True
+        kwargs["max_model_len"] = MAX_SEQ_LENGTH
+        kwargs["enable_prefix_caching"] = True
+        kwargs["enable_chunked_prefill"] = True
+        if QUANTIZATION:
+            kwargs["quantization"] = "bitsandbytes"
         # kwargs = dict(
         #     model=kwargs["model"],
         #     tensor_parallel_size=kwargs.get("tensor_parallel_size", 1),
@@ -1102,7 +1143,7 @@ def overwrite_engine_args(original_func):
         #     enable_sleep_mode=kwargs.get("enable_sleep_mode", True),
         # )
         return original_func(*args, **kwargs)
-
+    
     # Explicitly attach the original signature to pass 'inspect' validation
     wrapper.__signature__ = original_sig
     return wrapper
@@ -1113,19 +1154,12 @@ AsyncEngineArgs.__init__ = overwrite_engine_args(AsyncEngineArgs.__init__)
 LLM.__init__ = overwrite_engine_args(LLM.__init__)
 
 # %%
-model, tokenizer = load_model_and_tokenizer()
-
-# %%
-train_dataset, eval_dataset = prepare_datasets()
-
-# %%
 has_eval = eval_dataset is not None and len(eval_dataset) > 0
 bf16 = torch.cuda.is_bf16_supported()
 
 training_args = GRPOConfig(
     output_dir=str(OUTPUT_DIR),
     run_name=RUN_NAME,
-    max_prompt_length=MAX_PROMPT_LENGTH,
     max_completion_length=MAX_COMPLETION_LENGTH,
     # generation_kwargs={"max_length": MAX_SEQ_LENGTH},
     num_generations=NUM_GENERATIONS,
@@ -1135,6 +1169,7 @@ training_args = GRPOConfig(
     use_vllm=True,
     vllm_mode="colocate",
     vllm_gpu_memory_utilization=VLLM_GPU_MEMORY_UTILIZATION,
+    vllm_enable_sleep_mode=True,
     importance_sampling_level="sequence",
     beta=GRPO_BETA,
     loss_type=GRPO_LOSS_TYPE,

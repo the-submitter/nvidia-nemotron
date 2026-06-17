@@ -55,7 +55,7 @@ wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
 # !uv pip install --no-deps --upgrade \
 #     "torchao>=0.16.0" \
 #     --no-index --find-links={wheels_dir}
-# # !uv pip install vllm --no-index --find-links={wheels_dir}
+# # !uv pip install "vllm>=0.12.0,<0.19.0" --no-index --find-links={wheels_dir}
 # # !uv pip install "protobuf<6.0.0" --no-index --find-links={wheels_dir}
 
 # %%
@@ -111,11 +111,19 @@ SOURCE_OPTIONS = {
         "include": optional_string_list("TRAIN_INCLUDE_SOURCES", '["dgxchen/nemotron-cot-tong", "nvidia-nemotron-model-reasoning-challenge"]'),
         "order": optional_string_list("TRAIN_ORDER_BY_SOURCES"),
         "exclude": optional_string_list("TRAIN_EXCLUDE_SOURCES"),
+        "order_remaining": os.environ.get(
+            "TRAIN_ORDER_REMAINING",
+            "0",
+        ).lower() not in {"0", "false", "no"},
     },
     EVAL_SPLIT: {
         "include": optional_string_list("EVAL_INCLUDE_SOURCES"),
         "order": optional_string_list("EVAL_ORDER_BY_SOURCES"),
         "exclude": optional_string_list("EVAL_EXCLUDE_SOURCES"),
+        "order_remaining": os.environ.get(
+            "EVAL_ORDER_REMAINING",
+            "0",
+        ).lower() not in {"0", "false", "no"},
     },
 }
 TRAIN_SHUFFLE = os.environ.get("TRAIN_SHUFFLE", "0").lower() not in {
@@ -145,7 +153,10 @@ ADAPTER_OUTPUT_DIR = Path(
         str(WORKING_DIR / f"nemotron-lora-{TRAIN_STAGE}-{TRAIN_VERSION}"),
     )
 )
-ADAPTER_INPUT_PATH = os.environ.get("ADAPTER_INPUT_PATH")
+ADAPTER_INPUT_PATH = os.environ.get(
+    "ADAPTER_INPUT_PATH",
+    # "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/lora-sft/7",
+)
 HF_USERNAME = os.environ.get("HF_USERNAME", "the-submitter")
 HF_ADAPTER_REPO = os.environ.get(
     "HF_ADAPTER_REPO",
@@ -385,6 +396,7 @@ def apply_source_options(dataset, split_name: str):
     include_sources = options["include"]
     order_sources = options["order"]
     exclude_sources = set(options["exclude"])
+    order_remaining = options.get("order_remaining", False)
     if not include_sources and not order_sources and not exclude_sources:
         return dataset
     if "source" not in dataset.column_names:
@@ -426,27 +438,57 @@ def apply_source_options(dataset, split_name: str):
         before_wildcard = {
             source for source in order_sources[:wildcard_index] if source != "*"
         }
-        ordered_sources = (
+        before_remaining_sources = (
             include_sources
             + [source for source in explicit_order if source in before_wildcard]
-            + remaining_sources
-            + [source for source in explicit_order if source not in before_wildcard]
         )
+        after_remaining_sources = [
+            source for source in explicit_order if source not in before_wildcard
+        ]
     else:
-        ordered_sources = include_sources + explicit_order + remaining_sources
+        before_remaining_sources = include_sources + explicit_order
+        after_remaining_sources = []
+    ordered_sources = (
+        before_remaining_sources
+        + (remaining_sources if order_remaining else ["*"])
+        + after_remaining_sources
+    )
 
     indices_by_source: dict[Any, list[int]] = {}
     for index, source in enumerate(dataset["source"]):
         indices_by_source.setdefault(source, []).append(index)
-    selected_indices = [
+    before_remaining_indices = [
         index
-        for source in ordered_sources
+        for source in before_remaining_sources
         for index in indices_by_source.get(source, [])
     ]
+    if order_remaining:
+        remaining_indices = [
+            index
+            for source in remaining_sources
+            for index in indices_by_source.get(source, [])
+        ]
+    else:
+        remaining_source_set = set(remaining_sources)
+        remaining_indices = [
+            index
+            for index, source in enumerate(dataset["source"])
+            if source in remaining_source_set
+        ]
+    after_remaining_indices = [
+        index
+        for source in after_remaining_sources
+        for index in indices_by_source.get(source, [])
+    ]
+    selected_indices = (
+        before_remaining_indices
+        + remaining_indices
+        + after_remaining_indices
+    )
     ordered = dataset.select(selected_indices, keep_in_memory=KEEP_IN_MEMORY)
     print(
         f"{split_name}: source order={ordered_sources}; "
-        f"retained={len(ordered):,}"
+        f"order_remaining={order_remaining}; retained={len(ordered):,}"
     )
     return ordered
 

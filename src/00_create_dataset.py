@@ -77,15 +77,15 @@ UPLOAD_TO_KAGGLE = os.environ.get("UPLOAD_TO_KAGGLE", "1").lower() not in {
     "false",
     "no",
 }
-DEDUPE_BY_SPLIT = {
-    "train": os.environ.get("TRAIN_DEDUPE", "1").lower() not in {"0", "false", "no"},
-    "validation": os.environ.get("VALIDATION_DEDUPE", "1").lower() not in {"0", "false", "no"},
-    "test": os.environ.get("TEST_DEDUPE", "1").lower() not in {"0", "false", "no"},
-}
 FILTER_HQ_BY_SPLIT = {
     "train": os.environ.get("TRAIN_FILTER_HQ", "0").lower() not in {"0", "false", "no"},
     "validation": os.environ.get("VALIDATION_FILTER_HQ", "0").lower() not in {"0", "false", "no"},
     "test": os.environ.get("TEST_FILTER_HQ", "0").lower() not in {"0", "false", "no"},
+}
+GLOBAL_DEDUPE_BY_SPLIT = {
+    "train": os.environ.get("TRAIN_GLOBAL_DEDUPE", "1").lower() not in {"0", "false", "no"},
+    "validation": os.environ.get("VALIDATION_GLOBAL_DEDUPE", "1").lower() not in {"0", "false", "no"},
+    "test": os.environ.get("TEST_GLOBAL_DEDUPE", "1").lower() not in {"0", "false", "no"},
 }
 SHUFFLE_BY_SPLIT = {
     "train": os.environ.get("TRAIN_SHUFFLE", "1").lower() not in {"0", "false", "no"},
@@ -139,6 +139,7 @@ class DatasetConfig:
     filter_map: Mapping[str, set[Any]] = field(default_factory=dict)
     filter_map_include: bool = True
     stream_filter: Optional[ExamplePredicate] = None
+    dedupe: bool = True
     shuffle_seed: int = 42
     local_files: tuple[str, ...] = ()
     load_kwargs: Mapping[str, Any] = field(default_factory=dict)
@@ -821,6 +822,7 @@ DATA_CONFIGS = [
         quotas={"train": 7_830, "validation": 0, "test": 0},
         processor=process_nemotron_cot_tong,
         local_files=("problem_ids_matched.csv",),
+        dedupe=False,
     ),
     DatasetConfig(
         name=str(LOCAL_COMPETITION_PATH),
@@ -1052,7 +1054,59 @@ def process_dataset(dataset: Dataset, config: DatasetConfig) -> Dataset:
         desc=f"{config.name}: remove invalid",
         keep_in_memory=KEEP_IN_MEMORY,
     )
+    if config.dedupe:
+        processed = dedupe_dataset_by_prompt(processed, config.name)
     return processed
+
+
+def dedupe_score(example: dict[str, Any]) -> int:
+    response = clean_text(example.get("response"))
+    if response is None:
+        return -1
+    return len(response) + len(clean_text(example.get("reasoning")) or "")
+
+
+def select_deduped_prompt_indices(dataset: Dataset, desc: str) -> list[int]:
+    selected_by_prompt: dict[str, tuple[int, int]] = {}
+    dedupe_examples = tqdm(
+        enumerate(dataset),
+        total=len(dataset),
+        desc=desc,
+    )
+    for index, example in dedupe_examples:
+        prompt = example["prompt"]
+        score = dedupe_score(example)
+        if prompt in selected_by_prompt:
+            _current_index, current_score = selected_by_prompt[prompt]
+            if score < 0:
+                continue
+            if current_score >= 0 and current_score <= score:
+                continue
+        selected_by_prompt[prompt] = (index, score)
+
+    return sorted(
+        index for index, _score in selected_by_prompt.values()
+    )
+
+
+def dedupe_dataset_by_prompt(dataset: Dataset, name: str) -> Dataset:
+    selected_indices = select_deduped_prompt_indices(
+        dataset,
+        desc=f"{name}: dedupe by `prompt`",
+    )
+    if len(selected_indices) == len(dataset):
+        print(f"{name}: removed 0 duplicate prompts")
+        return dataset
+
+    deduped = dataset.select(
+        selected_indices,
+        keep_in_memory=KEEP_IN_MEMORY,
+    )
+    print(
+        f"{name}: removed {len(dataset) - len(deduped):,} "
+        "duplicate prompts"
+    )
+    return deduped
 
 
 def filter_dataset_by_length(dataset: Dataset, config: DatasetConfig) -> Dataset:
@@ -1153,46 +1207,9 @@ def build_final_dataset(configs: list[DatasetConfig]) -> DatasetDict:
             )
             continue
         combined = concatenate_datasets(parts)
-        if DEDUPE_BY_SPLIT.get(split):
-            selected_by_prompt: dict[str, tuple[int, int]] = {}
-            dedupe_combined = tqdm(
-                enumerate(combined),
-                desc=f"Final dataset (split=`{split}`): dedupe by `prompt`",
-            )
-            for index, example in dedupe_combined:
-                prompt = example["prompt"]
-                response = clean_text(example.get("response"))
-                if prompt in selected_by_prompt:
-                    _current_index, current_score = selected_by_prompt[prompt]
-                    if response is None:
-                        continue
-                    score = len(response) + len(
-                        clean_text(example.get("reasoning")) or ""
-                    )
-                    if current_score >= 0 and current_score <= score:
-                        continue
-                    selected_by_prompt[prompt] = (index, score)
-                else:
-                    score = (
-                        len(response)
-                        + len(clean_text(example.get("reasoning")) or "")
-                        if response is not None
-                        else -1
-                    )
-                    selected_by_prompt[prompt] = (index, score)
 
-            selected_indices = sorted(
-                index for index, _score in selected_by_prompt.values()
-            )
-            combined = combined.select(
-                selected_indices,
-                keep_in_memory=KEEP_IN_MEMORY,
-            )
-            print(
-                f"{split}: removed "
-                f"{sum(len(part) for part in parts) - len(combined):,} "
-                "duplicate prompts"
-            )
+        if GLOBAL_DEDUPE_BY_SPLIT.get(split):
+            combined = dedupe_dataset_by_prompt(combined, f"Final `{split}`")
 
         if FILTER_HQ_BY_SPLIT.get(split):
             before_hq = len(combined)
@@ -1244,12 +1261,11 @@ def validate_final_dataset(
         if len(set(dataset[split]["id"])) != len(dataset[split]):
             raise AssertionError(f"{split} contains duplicate ids")
         if (
-            DEDUPE_BY_SPLIT[split]
+            GLOBAL_DEDUPE_BY_SPLIT[split]
             and len(set(dataset[split]["prompt"])) != len(dataset[split])
         ):
             raise AssertionError(f"{split} contains duplicate prompts")
-
-    print("Validated deduplicated split sizes:", actual_sizes)
+    print("Validated split sizes:", actual_sizes)
 
 
 # %%

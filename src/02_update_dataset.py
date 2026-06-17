@@ -61,7 +61,7 @@ wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
 #     rapidfuzz \
 #     "antlr4-python3-runtime==4.11.0" \
 #     --no-index --find-links={wheels_dir}
-# !uv pip install vllm --no-index --find-links={wheels_dir}
+# !uv pip install "vllm>=0.12.0,<0.19.0" --no-index --find-links={wheels_dir}
 # !uv pip install "protobuf<6.0.0" --no-index --find-links={wheels_dir}
 
 # %%
@@ -114,7 +114,6 @@ HF_UPLOAD_USERNAME = os.environ.get(
 TRAJECTORIES = max(1, int(os.environ.get("TRAJECTORIES", "4")))
 PROMPT_BATCH_SIZE = max(1, int(os.environ.get("PROMPT_BATCH_SIZE", "100")))
 SEED = int(os.environ.get("SEED", "3407"))
-
 
 def optional_nonnegative_int(name: str, default: Optional[int] = None) -> Optional[int]:
     value = os.environ.get(name, str(default))
@@ -262,16 +261,28 @@ SOURCE_OPTIONS = {
         "include": optional_string_list("TRAIN_INCLUDE_SOURCES", '["nvidia-nemotron-model-reasoning-challenge", "dgxchen/nemotron-cot-tong"]'),
         "order": optional_string_list("TRAIN_ORDER_BY_SOURCES"),
         "exclude": optional_string_list("TRAIN_EXCLUDE_SOURCES"),
+        "order_remaining": os.environ.get(
+            "TRAIN_ORDER_REMAINING",
+            "0",
+        ).lower() not in {"0", "false", "no"},
     },
     "validation": {
         "include": optional_string_list("VALIDATION_INCLUDE_SOURCES"),
         "order": optional_string_list("VALIDATION_ORDER_BY_SOURCES"),
         "exclude": optional_string_list("VALIDATION_EXCLUDE_SOURCES"),
+        "order_remaining": os.environ.get(
+            "VALIDATION_ORDER_REMAINING",
+            "0",
+        ).lower() not in {"0", "false", "no"},
     },
     "test": {
         "include": optional_string_list("TEST_INCLUDE_SOURCES"),
         "order": optional_string_list("TEST_ORDER_BY_SOURCES"),
         "exclude": optional_string_list("TEST_EXCLUDE_SOURCES"),
+        "order_remaining": os.environ.get(
+            "TEST_ORDER_REMAINING",
+            "0",
+        ).lower() not in {"0", "false", "no"},
     },
 }
 for split_name in SPLIT_NAMES:
@@ -605,10 +616,15 @@ def select_preference(
         example.get("reasoning"),
         example.get("response"),
     )
+    # chosen = (
+    #     existing_chosen
+    #     if existing_chosen is not None
+    #     else correct_outputs[0][1] if correct_outputs else None
+    # )
     chosen = (
-        existing_chosen
-        if existing_chosen is not None
-        else correct_outputs[0][1] if correct_outputs else None
+        correct_outputs[0][1]
+        if correct_outputs
+        else existing_chosen if existing_chosen is not None else None
     )
     rejected = wrong_outputs[0][1] if wrong_outputs else None
     return {
@@ -746,11 +762,14 @@ def order_indices_by_source(
     dataset,
     indices: list[int],
     split_name: str,
+    order_remaining: Optional[bool] = None,
 ) -> list[int]:
     options = SOURCE_OPTIONS[split_name]
     include_sources = options["include"]
     order_sources = options["order"]
     exclude_sources = set(options["exclude"])
+    if order_remaining is None:
+        order_remaining = options.get("order_remaining", False)
     if not include_sources and not order_sources and not exclude_sources:
         return sorted(indices)
     if "source" not in dataset.column_names:
@@ -796,14 +815,21 @@ def order_indices_by_source(
         before_wildcard = {
             source for source in order_sources[:wildcard_index] if source != "*"
         }
-        ordered_sources = (
+        before_remaining_sources = (
             include_sources
             + [source for source in explicit_order if source in before_wildcard]
-            + remaining_sources
-            + [source for source in explicit_order if source not in before_wildcard]
         )
+        after_remaining_sources = [
+            source for source in explicit_order if source not in before_wildcard
+        ]
     else:
-        ordered_sources = include_sources + explicit_order + remaining_sources
+        before_remaining_sources = include_sources + explicit_order
+        after_remaining_sources = []
+    ordered_sources = (
+        before_remaining_sources
+        + (remaining_sources if order_remaining else ["*"])
+        + after_remaining_sources
+    )
 
     indices_by_source: dict[Any, list[int]] = {}
     for index in indices:
@@ -811,12 +837,38 @@ def order_indices_by_source(
             dataset[index].get("source"),
             [],
         ).append(index)
-    ordered_indices = [
+    before_remaining_indices = [
         index
-        for source in ordered_sources
+        for source in before_remaining_sources
         for index in indices_by_source.get(source, [])
     ]
-    print(f"{split_name}: candidate source order={ordered_sources}")
+    if order_remaining:
+        remaining_indices = [
+            index
+            for source in remaining_sources
+            for index in indices_by_source.get(source, [])
+        ]
+    else:
+        remaining_source_set = set(remaining_sources)
+        remaining_indices = sorted(
+            index
+            for index in indices
+            if dataset[index].get("source") in remaining_source_set
+        )
+    after_remaining_indices = [
+        index
+        for source in after_remaining_sources
+        for index in indices_by_source.get(source, [])
+    ]
+    ordered_indices = (
+        before_remaining_indices
+        + remaining_indices
+        + after_remaining_indices
+    )
+    print(
+        f"{split_name}: candidate source order={ordered_sources}; "
+        f"order_remaining={order_remaining}"
+    )
     return ordered_indices
 
 
@@ -1032,7 +1084,7 @@ def build_vllm_engine(
         temperature: float = TEMPERATURE,
         top_p: float = TOP_P,
         max_tokens: int = MAX_TOKENS,
-        lora_path: Path | str = LORA_PATH,
+        lora_path: Optional[Path | str] = LORA_PATH,
         cache_model_weights: bool = CACHE_MODEL_WEIGHTS,
         cache_model_workers: int = CACHE_MODEL_WORKERS,
         cache_model_chunk_mb: int = CACHE_MODEL_CHUNK_MB,
@@ -1072,7 +1124,7 @@ def build_vllm_engine(
         max_tokens=max_tokens,
         seed=seed,
     )
-    lora_request = LoRARequest("adapter", 1, str(lora_path))
+    lora_request = LoRARequest("adapter", 1, str(lora_path)) if lora_path else None
     return llm, sampling_params, lora_request
 
 
@@ -1310,10 +1362,10 @@ def save_and_upload(
 
 # %%
 model_path = Path(MODEL_PATH)
-lora_path = Path(LORA_PATH)
+lora_path = Path(LORA_PATH) if LORA_PATH else LORA_PATH
 if not model_path.exists():
     raise FileNotFoundError(f"Base model path does not exist: {model_path}")
-if not (lora_path / "adapter_config.json").exists():
+if lora_path and not (lora_path / "adapter_config.json").exists():
     raise FileNotFoundError(
         f"LoRA adapter_config.json does not exist under {lora_path}"
     )
