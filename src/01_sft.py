@@ -1,3 +1,19 @@
+# %% [markdown]
+# ## SFT Training Overview
+# - Runs supervised fine-tuning on response-ready examples from the unified reasoning
+#   dataset.
+# - Applies source controls, high-quality filters, index ranges, and chat-style formatting
+#   before training.
+# - Loads Nemotron through Unsloth, creates or resumes a LoRA adapter, and trains with TRL
+#   `SFTTrainer`.
+# - Saves trainer state, adapter weights, tokenizer files, and optional Hugging Face/Kaggle
+#   uploads.
+
+# %% [markdown]
+# ## Imports
+# - Load dependencies for this notebook script.
+# - Set early runtime flags before heavier stage-specific imports run.
+
 # %%
 from __future__ import annotations
 
@@ -6,6 +22,13 @@ import os
 import shutil
 from pathlib import Path
 from typing import Any, Optional
+
+
+
+# %% [markdown]
+# ## Credentials
+# - Read Kaggle, Hugging Face, and W&B credentials when available.
+# - Keep committed defaults safe for public or local dry runs.
 
 # %%
 # User secrets
@@ -34,6 +57,13 @@ from typing import Any, Optional
 
 HF_KEY = WANDB_KEY = KAGGLE_KEY = KAGGLE_USERNAME = None
 
+
+
+# %% [markdown]
+# ## Kaggle Dependencies
+# - Document optional Kaggle package-install commands.
+# - Use cached wheels or commented commands to keep notebook startup controllable.
+
 # %%
 wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
 # !pip install uv --no-index --find-links={wheels_dir}
@@ -58,6 +88,13 @@ wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
 # # !uv pip install "vllm>=0.12.0,<0.19.0" --no-index --find-links={wheels_dir}
 # # !uv pip install "protobuf<6.0.0" --no-index --find-links={wheels_dir}
 
+
+
+# %% [markdown]
+# ## Runtime Configuration
+# - Define paths, split names, source controls, hyperparameters, and upload destinations.
+# - Read values from environment variables so Kaggle and local runs can override defaults.
+
 # %%
 WORKING_DIR = Path(os.environ.get("WORKING_DIR", "/kaggle/working"))
 MODEL_PATH = os.environ.get(
@@ -74,7 +111,7 @@ DATASET_PATH = os.environ.get(
 )
 DATASET_REVISION = os.environ.get("DATASET_REVISION")
 TRAIN_SPLIT = os.environ.get("TRAIN_SPLIT", "train")
-EVAL_SPLIT = os.environ.get("EVAL_SPLIT", None)
+EVAL_SPLIT = os.environ.get("EVAL_SPLIT", "validation")
 
 def optional_nonnegative_int(name: str, default: Optional[int] = None) -> Optional[int]:
     value = os.environ.get(name, str(default))
@@ -102,10 +139,10 @@ def optional_string_list(name: str, default: Optional[str] = None) -> list[str]:
     return [item.strip() for item in parsed if item.strip()]
 
 
-TRAIN_MIN_IDX = optional_nonnegative_int("TRAIN_MIN_IDX", 0)
-TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX", 6171)
-EVAL_MIN_IDX = optional_nonnegative_int("EVAL_MIN_IDX", 15)
-EVAL_MAX_IDX = optional_nonnegative_int("EVAL_MAX_IDX", 35)
+TRAIN_MIN_IDX = optional_nonnegative_int("TRAIN_MIN_IDX")
+TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX")
+EVAL_MIN_IDX = optional_nonnegative_int("EVAL_MIN_IDX")
+EVAL_MAX_IDX = optional_nonnegative_int("EVAL_MAX_IDX")
 SOURCE_OPTIONS = {
     TRAIN_SPLIT: {
         "include": optional_string_list("TRAIN_INCLUDE_SOURCES", '["dgxchen/nemotron-cot-tong", "nvidia-nemotron-model-reasoning-challenge"]'),
@@ -126,7 +163,7 @@ SOURCE_OPTIONS = {
         ).lower() not in {"0", "false", "no"},
     },
 }
-TRAIN_SHUFFLE = os.environ.get("TRAIN_SHUFFLE", "0").lower() not in {
+TRAIN_SHUFFLE = os.environ.get("TRAIN_SHUFFLE", "1").lower() not in {
     "0",
     "false",
     "no",
@@ -144,7 +181,7 @@ FILTER_HQ_BY_SPLIT = {
 }
 
 TRAIN_STAGE = os.environ.get("TRAIN_STAGE", "sft")
-TRAIN_VERSION = os.environ.get("TRAIN_VERSION", "v2")
+TRAIN_VERSION = os.environ.get("TRAIN_VERSION", "v3")
 RUN_NAME = os.environ.get("RUN_NAME", f"nemotron-{TRAIN_STAGE}-{TRAIN_VERSION}")
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", str(WORKING_DIR / RUN_NAME)))
 ADAPTER_OUTPUT_DIR = Path(
@@ -232,6 +269,16 @@ if REPORT_TO == "wandb":
     os.makedirs("/kaggle/working/wandb_logs", exist_ok=True)
 
 
+
+
+# %% [markdown]
+# ## Helper Functions
+# - Define reusable helpers including `clean_text`, `is_trainable_example`,
+#   `is_high_quality_example`, `build_user_content`, `build_conversation`,
+#   `render_conversations`.
+# - Support parsing, filtering, formatting, verification, loading, or upload behavior used
+#   later.
+
 # %%
 def clean_text(value: Any) -> Optional[str]:
     if value is None:
@@ -255,6 +302,8 @@ HQ_SOURCES = {
 HQ_ANSWER_TYPES = {"integer", "float", "fraction"}
 
 def is_high_quality_example(example: dict[str, Any]) -> bool:
+    if example.get("response") and not example.get("reasoning"):
+        return False
     if example.get("source") in HQ_SOURCES:
         return True
     answer_type = clean_text(example.get("answer_type"))
@@ -344,6 +393,14 @@ def render_conversations(
         texts.append(text)
     return {"text": texts}
 
+
+
+
+# %% [markdown]
+# ## Dataset Loading
+# - Load datasets from local disk, Kaggle-mounted paths, Hugging Face repos, parquet files,
+#   or saved DatasetDicts.
+# - Normalize split handling and cache behavior for downstream processing.
 
 # %%
 def load_reasoning_dataset():
@@ -644,6 +701,13 @@ def prepare_datasets(tokenizer):
     return train_dataset, eval_dataset
 
 
+
+
+# %% [markdown]
+# ## Model and Adapter Loading
+# - Load the base model, tokenizer, and optional LoRA adapter.
+# - Configure trainable adapter parameters and runtime compatibility settings.
+
 # %%
 def prepare_adapter_input_path() -> Optional[str]:
     if ADAPTER_INPUT_PATH is None:
@@ -755,6 +819,12 @@ def resolve_resume_from_checkpoint() -> bool | str | None:
     return normalized
 
 
+
+
+# %% [markdown]
+# ## Training Runtime Bootstrap
+# - Initialize tokenizer and CUDA allocator settings.
+# - Create output directories and import Unsloth, Torch, TRL SFT, and response-only masking utilities.
 # %%
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
@@ -769,11 +839,35 @@ from unsloth.chat_templates import train_on_responses_only
 if not torch.cuda.is_available():
     raise RuntimeError("SFT training requires a CUDA GPU")
 
+
+
+# %% [markdown]
+# ## Stage Preparation
+# - Materialize the model, tokenizer, dataset splits, or inference engine needed by later
+#   cells.
+# - Keep heavyweight setup isolated before training or generation begins.
+
 # %%
 model, tokenizer = load_model_and_tokenizer()
 
+
+
+# %% [markdown]
+# ## Stage Preparation
+# - Materialize the model, tokenizer, dataset splits, or inference engine needed by later
+#   cells.
+# - Keep heavyweight setup isolated before training or generation begins.
+
 # %%
 train_dataset, eval_dataset = prepare_datasets(tokenizer)
+
+
+
+# %% [markdown]
+# ## Trainer Configuration
+# - Configure trainer-specific hyperparameters, precision, checkpointing, evaluation, and
+#   reporting.
+# - Bind optimizer, batching, sequence length, and stage-specific training options.
 
 # %%
 has_eval = eval_dataset is not None and len(eval_dataset) > 0
@@ -838,6 +932,12 @@ trainer = train_on_responses_only(
     response_part=RESPONSE_PART,
 )
 
+
+
+# %% [markdown]
+# ## Runtime Sanity Checks
+# - Collect training statistics for later runtime and memory reporting.
+
 # %%
 sample = trainer.train_dataset[0]
 if not any(label != -100 for label in sample["labels"]):
@@ -861,16 +961,36 @@ print(tokenizer.decode(
     ).replace(tokenizer.pad_token, " ")[:2000]
 )
 
+
+
+# %% [markdown]
+# ## Training Execution
+# - Start or resume training from the configured checkpoint.
+# - Collect training statistics for later runtime and memory reporting.
+
 # %%
 trainer_stats = trainer.train(
     resume_from_checkpoint=resolve_resume_from_checkpoint()
 )
+
+
+
+# %% [markdown]
+# ## Save Artifacts
+# - Persist datasets, adapters, tokenizer files, trainer state, or output folders.
+# - Prepare generated artifacts for reuse and optional publishing.
 
 # %%
 trainer.save_state()
 model.save_pretrained(str(ADAPTER_OUTPUT_DIR))
 tokenizer.save_pretrained(str(ADAPTER_OUTPUT_DIR))
 
+
+
+# %% [markdown]
+# ## Adapter Metadata Normalization
+# - Rewrite saved adapter metadata back from Kaggle-local model paths to the original base model id.
+# - Keep uploaded adapter configs portable outside the Kaggle runtime.
 # %%
 if MODEL_PATH and BASE_MODEL_ID:
     readme_path = ADAPTER_OUTPUT_DIR / "README.md"
@@ -884,12 +1004,26 @@ if MODEL_PATH and BASE_MODEL_ID:
             config_path.read_text().replace(MODEL_PATH, BASE_MODEL_ID)
         )
 
+
+
+# %% [markdown]
+# ## Runtime Sanity Checks
+# - Print representative samples, reward values, GPU details, or runtime metrics.
+# - Help catch formatting and resource issues before or after long-running work.
+
 # %%
 peak_reserved = torch.cuda.max_memory_reserved() / 1024**3
 runtime = trainer_stats.metrics.get("train_runtime", 0.0)
 print(f"Training runtime: {runtime:.2f} seconds ({runtime / 60:.2f} minutes)")
 print(f"Peak reserved VRAM: {peak_reserved:.2f} GiB")
 print(f"Saved LoRA adapter to {ADAPTER_OUTPUT_DIR}")
+
+
+
+# %% [markdown]
+# ## Upload Artifacts
+# - Publish generated datasets or model adapters when upload flags are enabled.
+# - Use Hugging Face and Kaggle APIs with configured credentials.
 
 # %%
 if PUSH_TO_HUB:
@@ -931,6 +1065,13 @@ if PUSH_TO_HUB:
             print(f"Upload to HF succeeded")
     else:
         print(f"Upload to HF succeeded")
+
+
+
+# %% [markdown]
+# ## Upload Artifacts
+# - Publish generated datasets or model adapters when upload flags are enabled.
+# - Use Hugging Face and Kaggle APIs with configured credentials.
 
 # %%
 if PUSH_TO_KAGGLE:

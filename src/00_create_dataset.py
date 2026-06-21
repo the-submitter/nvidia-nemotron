@@ -1,3 +1,19 @@
+# %% [markdown]
+# ## Dataset Creation Overview
+# - Builds the canonical Nemotron reasoning `DatasetDict` consumed by SFT, preference
+#   generation, DPO, and GRPO/GSPO stages.
+# - Normalizes Hugging Face, Kaggle, and local sources into a shared schema with prompt,
+#   reasoning, response, final answer, and metadata fields.
+# - Supports streaming selection, length ranking, per-source quotas, per-dataset dedupe,
+#   global dedupe, high-quality filtering, and deterministic split shuffling.
+# - Validates schema and identifiers, saves the final dataset locally, and optionally
+#   publishes to Hugging Face and Kaggle.
+
+# %% [markdown]
+# ## Imports
+# - Load dependencies for this notebook script.
+# - Set early runtime flags before heavier stage-specific imports run.
+
 # %%
 from __future__ import annotations
 
@@ -7,6 +23,13 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal, Mapping, Optional
+
+
+
+# %% [markdown]
+# ## Credentials
+# - Read Kaggle, Hugging Face, and W&B credentials when available.
+# - Keep committed defaults safe for public or local dry runs.
 
 # %%
 # User secrets
@@ -29,9 +52,23 @@ if KAGGLE_USERNAME:
 if HF_KEY:
     os.environ["HF_TOKEN"] = HF_KEY
 
+
+
+# %% [markdown]
+# ## Kaggle Dependencies
+# - Document optional Kaggle package-install commands.
+# - Use cached wheels or commented commands to keep notebook startup controllable.
+
 # %%
-# %%capture
-# !pip install -qqq "datasets>=5.0.0" kagglehub tqdm --root-user-action ignore
+# !pip install "datasets>=5.0.0" kagglehub tqdm --root-user-action ignore
+
+
+
+# %% [markdown]
+# ## Runtime Configuration
+# - Import Hugging Face Datasets and progress utilities.
+# - Define cache paths, upload flags, split controls, dedupe toggles, and runtime worker
+#   settings.
 
 # %%
 from datasets import (
@@ -105,6 +142,13 @@ if KEEP_IN_MEMORY:
         os.environ.get("IN_MEMORY_MAX_SIZE", str(30 * 1024**3))
     )
 
+
+
+# %% [markdown]
+# ## Dataset Schema and Config
+# - Define the normalized dataset schema and typed source configuration object.
+# - Capture quotas, processors, filters, streaming options, dedupe, and loader settings.
+
 # %%
 SPLIT_NAMES = ("train", "validation", "test")
 SCHEMA_COLUMNS = (
@@ -149,6 +193,16 @@ class DatasetConfig:
         return sum(self.quotas.get(split, 0) for split in SPLIT_NAMES)
 
 
+
+
+# %% [markdown]
+# ## Helper Functions
+# - Define reusable helpers including `clean_text`, `is_high_quality_example`,
+#   `contains_url`, `extract_boxed_spans`, `strip_boxed`, `extract_last_boxed_answer`,
+#   `reconcile_final_answer`, `split_think_content`.
+# - Support parsing, filtering, formatting, verification, loading, or upload behavior used
+#   later.
+
 # %%
 URL_RE = re.compile(r"https?://", re.IGNORECASE)
 THINK_RE = re.compile(r"<think>(.*?)</think>", re.IGNORECASE | re.DOTALL)
@@ -175,6 +229,8 @@ HQ_SOURCES = {
 HQ_ANSWER_TYPES = {"integer", "float", "fraction"}
 
 def is_high_quality_example(example: dict[str, Any]) -> bool:
+    # if example.get("response") and not example.get("reasoning"):
+    #     return False
     if example.get("source") in HQ_SOURCES:
         return True
     answer_type = clean_text(example.get("answer_type"))
@@ -413,6 +469,14 @@ def stable_id(source: str, split: str, index: int) -> str:
 def assistant_content_length(example: dict[str, Any]) -> int:
     return len(assistant_message_content(example.get("messages")) or "")
 
+
+
+
+# %% [markdown]
+# ## Source Normalizers
+# - Convert raw source-specific examples into the shared reasoning schema.
+# - Extract prompts, reasoning, responses, final answers, domains, answer types, and
+#   difficulty metadata.
 
 # %%
 def process_numina(example: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -718,6 +782,14 @@ def process_competition_data(example: dict[str, Any]) -> Optional[dict[str, Any]
     )
 
 
+
+
+# %% [markdown]
+# ## Dataset Source Configurations
+# - Declare every source dataset used in the unified reasoning corpus.
+# - Attach quotas, processors, filtering rules, streaming behavior, and local-file
+#   requirements.
+
 # %%
 DATA_CONFIGS = [
     DatasetConfig(
@@ -832,6 +904,14 @@ DATA_CONFIGS = [
     ),
 ]
 
+
+
+
+# %% [markdown]
+# ## Source Normalizers
+# - Convert raw source-specific examples into the shared reasoning schema.
+# - Extract prompts, reasoning, responses, final answers, domains, answer types, and
+#   difficulty metadata.
 
 # %%
 def resolve_split(
@@ -984,10 +1064,15 @@ def materialize_streaming_dataset(
             heapq.heapreplace(retained, entry)
 
     if len(retained) < target_size:
-        raise ValueError(
+        print(
             f"{config.name}: requested {target_size:,} valid streamed records, "
-            f"but only {len(retained):,} were available from {seen:,} rows"
+            f"but only {len(retained):,} were available from {seen:,} rows. "
+            f"Using {len(retained):,} records"
         )
+        # raise ValueError(
+        #     f"{config.name}: requested {target_size:,} valid streamed records, "
+        #     f"but only {len(retained):,} were available from {seen:,} rows"
+        # )
 
     retained.sort(key=lambda item: (-item[0], item[2]))
     rows = [item[3] for item in retained]
@@ -1148,18 +1233,27 @@ def filter_dataset_by_length(dataset: Dataset, config: DatasetConfig) -> Dataset
 
 def allocate_fixed_splits(dataset: Dataset, config: DatasetConfig) -> DatasetDict:
     if len(dataset) < config.total_size:
-        raise ValueError(
+        print(
             f"{config.name}: requested {config.total_size:,} valid records, "
-            f"but only {len(dataset):,} are available"
+            f"but only {len(dataset):,} are available. "
+            f"Using {len(dataset):,} records"
         )
+        # raise ValueError(
+        #     f"{config.name}: requested {config.total_size:,} valid records, "
+        #     f"but only {len(dataset):,} are available"
+        # )
 
-    selected = dataset.select(range(config.total_size), keep_in_memory=KEEP_IN_MEMORY)
+    selected = (
+        dataset.select(range(config.total_size), keep_in_memory=KEEP_IN_MEMORY)
+        if config.total_size < len(dataset)
+        else dataset
+    )
     selected = selected.shuffle(seed=config.shuffle_seed, keep_in_memory=KEEP_IN_MEMORY)
 
     output = {}
     offset = 0
     for split in SPLIT_NAMES:
-        size = config.quotas.get(split, 0)
+        size = min(config.quotas.get(split, 0), max(len(dataset) - offset, 0))
         split_dataset = (
             selected.select(range(offset, offset + size), keep_in_memory=KEEP_IN_MEMORY)
             if size
@@ -1268,14 +1362,37 @@ def validate_final_dataset(
     print("Validated split sizes:", actual_sizes)
 
 
+
+
+# %% [markdown]
+# ## Dataset Source Configurations
+# - Declare every source dataset used in the unified reasoning corpus.
+# - Attach quotas, processors, filtering rules, streaming behavior, and local-file
+#   requirements.
+
 # %%
 final_dataset = build_final_dataset(DATA_CONFIGS)
 
+
+
+
+# %% [markdown]
+# ## Dataset Source Configurations
+# - Declare every source dataset used in the unified reasoning corpus.
+# - Attach quotas, processors, filtering rules, streaming behavior, and local-file
+#   requirements.
 
 # %%
 validate_final_dataset(final_dataset, DATA_CONFIGS)
 print(final_dataset)
 
+
+
+
+# %% [markdown]
+# ## Save Artifacts
+# - Persist datasets, adapters, tokenizer files, trainer state, or output folders.
+# - Prepare generated artifacts for reuse and optional publishing.
 
 # %%
 final_dataset.save_to_disk(
@@ -1284,6 +1401,13 @@ final_dataset.save_to_disk(
 )
 print(f"Saved dataset to {LOCAL_OUTPUT_DIR}")
 
+
+
+
+# %% [markdown]
+# ## Upload Artifacts
+# - Publish generated datasets or model adapters when upload flags are enabled.
+# - Use Hugging Face and Kaggle APIs with configured credentials.
 
 # %%
 if UPLOAD_TO_HF:
@@ -1300,6 +1424,13 @@ if UPLOAD_TO_HF:
     else:
         print(f"Upload to HF succeeded")
 
+
+
+
+# %% [markdown]
+# ## Upload Artifacts
+# - Publish generated datasets or model adapters when upload flags are enabled.
+# - Use Hugging Face and Kaggle APIs with configured credentials.
 
 # %%
 if UPLOAD_TO_KAGGLE:

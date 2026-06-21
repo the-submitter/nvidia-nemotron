@@ -1,3 +1,18 @@
+# %% [markdown]
+# ## Preference Update Overview
+# - Generates DPO preference fields for prompts that need chosen/rejected completions.
+# - Selects candidates with source ordering, HQ filters, range/take limits, and resumable
+#   DPO bookkeeping.
+# - Runs vLLM trajectories, extracts/verifies final answers, and chooses shortest
+#   correct/wrong completions.
+# - Persists incremental split snapshots, optional CSV backups, and updated upload-ready
+#   datasets.
+
+# %% [markdown]
+# ## Imports
+# - Load dependencies for this notebook script.
+# - Set early runtime flags before heavier stage-specific imports run.
+
 # %%
 from __future__ import annotations
 
@@ -11,6 +26,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Optional
+
+
+
+# %% [markdown]
+# ## Credentials
+# - Read Kaggle, Hugging Face, and W&B credentials when available.
+# - Keep committed defaults safe for public or local dry runs.
 
 # %%
 # User secrets
@@ -34,6 +56,13 @@ from typing import Any, Optional
 #     os.environ["HF_TOKEN"] = HF_KEY
 
 HF_KEY = KAGGLE_KEY = KAGGLE_USERNAME = None
+
+
+
+# %% [markdown]
+# ## Kaggle Dependencies
+# - Document optional Kaggle package-install commands.
+# - Use cached wheels or commented commands to keep notebook startup controllable.
 
 # %%
 wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
@@ -63,6 +92,13 @@ wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
 #     --no-index --find-links={wheels_dir}
 # !uv pip install "vllm>=0.12.0,<0.19.0" --no-index --find-links={wheels_dir}
 # !uv pip install "protobuf<6.0.0" --no-index --find-links={wheels_dir}
+
+
+
+# %% [markdown]
+# ## Runtime Configuration
+# - Define paths, split names, source controls, hyperparameters, and upload destinations.
+# - Read values from environment variables so Kaggle and local runs can override defaults.
 
 # %%
 WORKING_DIR = Path(os.environ.get("WORKING_DIR", "/kaggle/working"))
@@ -391,6 +427,14 @@ BACKUP_FIELDS = (
 )
 
 
+
+
+# %% [markdown]
+# ## Answer Extraction and Rewards
+# - Extract boxed or fallback final answers and verify them against references.
+# - Compute reward components for exactness, fuzzy similarity, boxed formatting, and
+#   reasoning tags.
+
 # %%
 import math_verify
 
@@ -408,6 +452,8 @@ HQ_SOURCES = {
 HQ_ANSWER_TYPES = {"integer", "float", "fraction"}
 
 def is_high_quality_example(example: dict[str, Any]) -> bool:
+    if example.get("response") and not example.get("reasoning"):
+        return False
     if example.get("source") in HQ_SOURCES:
         return True
     answer_type = clean_text(example.get("answer_type"))
@@ -634,6 +680,14 @@ def select_preference(
         "trajectory_correct": correctness,
     }
 
+
+
+
+# %% [markdown]
+# ## Dataset Loading
+# - Load datasets from local disk, Kaggle-mounted paths, Hugging Face repos, parquet files,
+#   or saved DatasetDicts.
+# - Normalize split handling and cache behavior for downstream processing.
 
 # %%
 def load_reasoning_dataset():
@@ -1029,6 +1083,13 @@ def select_generation_candidates(dataset, split_name: str):
     return dataset, candidates
 
 
+
+
+# %% [markdown]
+# ## vLLM Generation and Updates
+# - Run batched trajectory generation through vLLM.
+# - Select preferences, update rows incrementally, and persist progress snapshots.
+
 # %%
 def cache_model(
     path: str | Path,
@@ -1151,6 +1212,13 @@ def format_generation_prompts(tokenizer: Any, prompts: list[str]) -> list[str]:
         formatted.append(rendered)
     return formatted
 
+
+
+
+# %% [markdown]
+# ## vLLM Generation and Updates
+# - Run batched trajectory generation through vLLM.
+# - Select preferences, update rows incrementally, and persist progress snapshots.
 
 # %%
 def backup_path(split_name: str) -> Path:
@@ -1360,6 +1428,12 @@ def save_and_upload(
     return dataset_dict
 
 
+
+
+# %% [markdown]
+# ## Model Path Validation
+# - Validate that the base model path exists before constructing the vLLM engine.
+# - Validate the optional LoRA adapter path when an adapter is configured.
 # %%
 model_path = Path(MODEL_PATH)
 lora_path = Path(LORA_PATH) if LORA_PATH else LORA_PATH
@@ -1370,6 +1444,12 @@ if lora_path and not (lora_path / "adapter_config.json").exists():
         f"LoRA adapter_config.json does not exist under {lora_path}"
     )
 
+
+
+# %% [markdown]
+# ## Dataset Loading and Split Discovery
+# - Load the reasoning dataset and identify available train/validation/test splits.
+# - Fail early when no configured splits are present.
 # %%
 dataset_dict = load_reasoning_dataset()
 available_splits = [
@@ -1382,6 +1462,12 @@ if not available_splits:
         f"None of {SPLIT_NAMES} exist in dataset: {list(dataset_dict)}"
     )
 
+
+
+# %% [markdown]
+# ## Candidate Selection Pass
+# - Select DPO generation candidates for each available split.
+# - Persist candidate marks and keep split-level candidate datasets for generation.
 # %%
 candidates_by_split = {}
 for split_name in available_splits:
@@ -1391,6 +1477,14 @@ for split_name in available_splits:
     )
     dataset_dict[split_name] = updated_split
     candidates_by_split[split_name] = candidates
+
+
+
+# %% [markdown]
+# ## Stage Preparation
+# - Materialize the model, tokenizer, dataset splits, or inference engine needed by later
+#   cells.
+# - Keep heavyweight setup isolated before training or generation begins.
 
 # %%
 has_candidates = any(
@@ -1403,6 +1497,12 @@ else:
     llm = sampling_params = lora_request = None
     print("No prompts require preference generation")
 
+
+
+# %% [markdown]
+# ## Generation and Incremental Updates
+# - Run vLLM generation for candidate splits that contain work.
+# - Update dataset rows batch-by-batch and preserve progress through incremental snapshots.
 # %%
 if has_candidates:
     for split_name in available_splits:
@@ -1418,9 +1518,23 @@ if has_candidates:
             lora_request,
         )
 
+
+
+# %% [markdown]
+# ## Save Artifacts
+# - Persist datasets, adapters, tokenizer files, trainer state, or output folders.
+# - Prepare generated artifacts for reuse and optional publishing.
+
 # %%
 save_and_upload(dataset_dict)
 # dataset_dict = save_and_upload(LOCAL_OUTPUT_DIR, save_to_disk=False)
+
+
+
+# %% [markdown]
+# ## Runtime Sanity Checks
+# - Print representative samples, reward values, GPU details, or runtime metrics.
+# - Help catch formatting and resource issues before or after long-running work.
 
 # %%
 # from datasets import load_from_disk

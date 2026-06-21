@@ -1,3 +1,17 @@
+# %% [markdown]
+# ## DPO Training Overview
+# - Continues the SFT LoRA adapter with direct preference optimization.
+# - Filters rows with non-empty chosen/rejected fields and formats prompt/completion pairs
+#   for DPO.
+# - Uses Unsloth model loading and TRL `DPOTrainer` with configurable beta, loss type, and
+#   reference log-prob handling.
+# - Saves the continued adapter and optional Hugging Face/Kaggle artifacts.
+
+# %% [markdown]
+# ## Imports
+# - Load dependencies for this notebook script.
+# - Set early runtime flags before heavier stage-specific imports run.
+
 # %%
 from __future__ import annotations
 
@@ -7,6 +21,13 @@ import re
 import shutil
 from pathlib import Path
 from typing import Any, Optional
+
+
+
+# %% [markdown]
+# ## Credentials
+# - Read Kaggle, Hugging Face, and W&B credentials when available.
+# - Keep committed defaults safe for public or local dry runs.
 
 # %%
 # User secrets
@@ -35,6 +56,13 @@ from typing import Any, Optional
 
 HF_KEY = WANDB_KEY = KAGGLE_KEY = KAGGLE_USERNAME = None
 
+
+
+# %% [markdown]
+# ## Kaggle Dependencies
+# - Document optional Kaggle package-install commands.
+# - Use cached wheels or commented commands to keep notebook startup controllable.
+
 # %%
 wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
 # !pip install uv --no-index --find-links={wheels_dir}
@@ -54,6 +82,13 @@ wheels_dir = "/kaggle/input/datasets/rohitraje0493/unsloth-vllm-wheels/packages"
 #     --no-index --find-links={wheels_dir}
 # # !uv pip install "vllm>=0.12.0,<0.19.0" --no-index --find-links={wheels_dir}
 # # !uv pip install "protobuf<6.0.0" --no-index --find-links={wheels_dir}
+
+
+
+# %% [markdown]
+# ## Runtime Configuration
+# - Define paths, split names, source controls, hyperparameters, and upload destinations.
+# - Read values from environment variables so Kaggle and local runs can override defaults.
 
 # %%
 WORKING_DIR = Path(os.environ.get("WORKING_DIR", "/kaggle/working"))
@@ -240,6 +275,16 @@ if REPORT_TO == "wandb":
     os.environ.setdefault("WANDB_SILENT", "true")
 
 
+
+
+# %% [markdown]
+# ## Helper Functions
+# - Define reusable helpers including `clean_text`, `is_preference_example`,
+#   `is_high_quality_example`, `build_user_content`, `remove_leading_think`,
+#   `render_dpo_example`.
+# - Support parsing, filtering, formatting, verification, loading, or upload behavior used
+#   later.
+
 # %%
 def clean_text(value: Any) -> Optional[str]:
     if value is None:
@@ -263,6 +308,8 @@ HQ_SOURCES = {
 HQ_ANSWER_TYPES = {"integer", "float", "fraction"}
 
 def is_high_quality_example(example: dict[str, Any]) -> bool:
+    if example.get("response") and not example.get("reasoning"):
+        return False
     if example.get("source") in HQ_SOURCES:
         return True
     answer_type = clean_text(example.get("answer_type"))
@@ -328,6 +375,14 @@ def render_dpo_example(
         "rejected": rejected,
     }
 
+
+
+
+# %% [markdown]
+# ## Dataset Loading
+# - Load datasets from local disk, Kaggle-mounted paths, Hugging Face repos, parquet files,
+#   or saved DatasetDicts.
+# - Normalize split handling and cache behavior for downstream processing.
 
 # %%
 def load_preference_dataset():
@@ -611,6 +666,13 @@ def prepare_datasets(tokenizer):
     return train_dataset, eval_dataset
 
 
+
+
+# %% [markdown]
+# ## Model and Adapter Loading
+# - Load the base model, tokenizer, and optional LoRA adapter.
+# - Configure trainable adapter parameters and runtime compatibility settings.
+
 # %%
 def prepare_adapter_input_path() -> Optional[str]:
     if ADAPTER_INPUT_PATH is None:
@@ -720,6 +782,12 @@ def resolve_resume_from_checkpoint() -> bool | str | None:
     return normalized
 
 
+
+
+# %% [markdown]
+# ## Training Runtime Bootstrap
+# - Initialize tokenizer and CUDA allocator settings.
+# - Create output directories and import Unsloth DPO patching, Torch, and TRL DPO utilities.
 # %%
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
@@ -736,11 +804,35 @@ from trl import DPOConfig, DPOTrainer
 if not torch.cuda.is_available():
     raise RuntimeError("DPO training requires a CUDA GPU")
 
+
+
+# %% [markdown]
+# ## Stage Preparation
+# - Materialize the model, tokenizer, dataset splits, or inference engine needed by later
+#   cells.
+# - Keep heavyweight setup isolated before training or generation begins.
+
 # %%
 model, tokenizer = load_model_and_tokenizer()
 
+
+
+# %% [markdown]
+# ## Stage Preparation
+# - Materialize the model, tokenizer, dataset splits, or inference engine needed by later
+#   cells.
+# - Keep heavyweight setup isolated before training or generation begins.
+
 # %%
 train_dataset, eval_dataset = prepare_datasets(tokenizer)
+
+
+
+# %% [markdown]
+# ## Trainer Configuration
+# - Configure trainer-specific hyperparameters, precision, checkpointing, evaluation, and
+#   reporting.
+# - Bind optimizer, batching, sequence length, and stage-specific training options.
 
 # %%
 has_eval = eval_dataset is not None and len(eval_dataset) > 0
@@ -799,6 +891,13 @@ dpo_trainer = DPOTrainer(
     ),
 )
 
+
+
+# %% [markdown]
+# ## Runtime Sanity Checks
+# - Print representative samples, reward values, GPU details, or runtime metrics.
+# - Help catch formatting and resource issues before or after long-running work.
+
 # %%
 sample = train_dataset[0]
 print("Rendered DPO prompt:")
@@ -815,16 +914,36 @@ print(
     f"initial_reserved={start_reserved:.2f} GiB"
 )
 
+
+
+# %% [markdown]
+# ## Training Execution
+# - Start or resume training from the configured checkpoint.
+# - Collect training statistics for later runtime and memory reporting.
+
 # %%
 trainer_stats = dpo_trainer.train(
     resume_from_checkpoint=resolve_resume_from_checkpoint()
 )
+
+
+
+# %% [markdown]
+# ## Save Artifacts
+# - Persist datasets, adapters, tokenizer files, trainer state, or output folders.
+# - Prepare generated artifacts for reuse and optional publishing.
 
 # %%
 dpo_trainer.save_state()
 model.save_pretrained(str(ADAPTER_OUTPUT_DIR))
 tokenizer.save_pretrained(str(ADAPTER_OUTPUT_DIR))
 
+
+
+# %% [markdown]
+# ## Adapter Metadata Normalization
+# - Rewrite saved adapter metadata back from Kaggle-local model paths to the original base model id.
+# - Keep uploaded adapter configs portable outside the Kaggle runtime.
 # %%
 if MODEL_PATH and BASE_MODEL_ID:
     readme_path = ADAPTER_OUTPUT_DIR / "README.md"
@@ -838,12 +957,26 @@ if MODEL_PATH and BASE_MODEL_ID:
             config_path.read_text().replace(MODEL_PATH, BASE_MODEL_ID)
         )
 
+
+
+# %% [markdown]
+# ## Runtime Sanity Checks
+# - Print representative samples, reward values, GPU details, or runtime metrics.
+# - Help catch formatting and resource issues before or after long-running work.
+
 # %%
 peak_reserved = torch.cuda.max_memory_reserved() / 1024**3
 runtime = trainer_stats.metrics.get("train_runtime", 0.0)
 print(f"Training runtime: {runtime:.2f} seconds ({runtime / 60:.2f} minutes)")
 print(f"Peak reserved VRAM: {peak_reserved:.2f} GiB")
 print(f"Saved DPO-trained LoRA adapter to {ADAPTER_OUTPUT_DIR}")
+
+
+
+# %% [markdown]
+# ## Upload Artifacts
+# - Publish generated datasets or model adapters when upload flags are enabled.
+# - Use Hugging Face and Kaggle APIs with configured credentials.
 
 # %%
 if PUSH_TO_HUB:
@@ -885,6 +1018,13 @@ if PUSH_TO_HUB:
             print(f"Upload to Hugging Face succeeded")
     else:
         print(f"Upload to Hugging Face succeeded")
+
+
+
+# %% [markdown]
+# ## Upload Artifacts
+# - Publish generated datasets or model adapters when upload flags are enabled.
+# - Use Hugging Face and Kaggle APIs with configured credentials.
 
 # %%
 if PUSH_TO_KAGGLE:
