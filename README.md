@@ -24,7 +24,7 @@ Training and dataset-building pipeline for NVIDIA Nemotron reasoning experiments
 - `src/01_sft.py` / `notebooks/01_sft.ipynb`: supervised fine-tuning with Unsloth + TRL `SFTTrainer`.
 - `src/02_update_dataset.py` / `notebooks/02_update_dataset.ipynb`: generate DPO chosen/rejected samples with vLLM.
 - `src/03_dpo.py` / `notebooks/03_dpo.ipynb`: continue the SFT LoRA adapter with DPO.
-- `src/04_grpo_gspo.py` / `notebooks/04_grpo_gspo.ipynb`: GSPO/GRPO experiment using Unsloth + colocated vLLM.
+- `src/04_grpo_gspo_unsloth.py` / `notebooks/04_grpo_gspo_unsloth.ipynb`: GSPO/GRPO experiment using Unsloth + colocated vLLM.
 - `src/04_grpo_gspo_trl.py` / `notebooks/04_grpo_gspo_trl.ipynb`: native Transformers/PEFT + TRL GRPO variant.
 - `references/`: reference notebooks/scripts used while adapting SFT, DPO, metric, and GRPO logic.
 
@@ -180,7 +180,7 @@ Important knobs:
 - `TRAIN_MIN_IDX`, `TRAIN_MAX_IDX`, `EVAL_MIN_IDX`, `EVAL_MAX_IDX`
 - `LORA_R`, `LORA_ALPHA`, `LEARNING_RATE`, `MAX_STEPS`
 
-## `src/04_grpo_gspo.py` — GSPO/GRPO with Unsloth
+## `src/04_grpo_gspo_unsloth.py` — GSPO/GRPO with Unsloth
 
 Experimental GSPO/GRPO stage using TRL `GRPOTrainer` with colocated vLLM and Unsloth model loading.
 
@@ -210,7 +210,7 @@ Experimental GSPO/GRPO stage using TRL `GRPOTrainer` with colocated vLLM and Uns
 
 Native Transformers/PEFT + TRL GRPO variant created because Unsloth had issues syncing with vLLM for this hybrid model.
 
-**Differences from `04_grpo_gspo.py`**
+**Differences from `04_grpo_gspo_unsloth.py`**
 - Loads the base model with `AutoModelForCausalLM`.
 - Attaches or resumes LoRA with PEFT.
 - Uses TRL `GRPOTrainer` directly with `use_vllm=True` and `vllm_mode="colocate"`.
@@ -244,11 +244,11 @@ GRPO scripts also support:
 
 ## Kaggle Notebook Run Notes
 
-- `00_create_dataset.ipynb`: Create Dataset, Version 8.
-- `01_sft.ipynb`: SFT Train, interactive run.
-- `02_update_dataset.ipynb`: Update Dataset, interactive run.
-- `03_dpo.ipynb`: DPO Train, Version 5.
-- `04_grpo_gspo.ipynb`: GSPO Train, vLLM path hit Unsloth state-dict mapping/sync issues; Transformers fallback was too slow.
+- `00_create_dataset.ipynb`: Create Dataset, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-create-dataset`: Version 19.
+- `01_sft.ipynb`: SFT Train, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-sft`: Version 11.
+- `02_update_dataset.ipynb`: Update Dataset, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-update-dataset`: Version 12.
+- `03_dpo.ipynb`: DPO Train, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-dpo?scriptVersionId=327472670`: Version 5.
+- `04_grpo_gspo_unsloth.ipynb`: GSPO Train Unsloth, vLLM path hit Unsloth state-dict mapping/sync issues; Transformers fallback was too slow.
 - `04_grpo_gspo_trl.ipynb`: GSPO Train TRL, colocated vLLM path hit CUDA OOM.
 
 ## Practical Notes

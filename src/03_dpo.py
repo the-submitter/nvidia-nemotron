@@ -111,7 +111,7 @@ DATASET_PATH = os.environ.get(
 DATASET_REVISION = os.environ.get("DATASET_REVISION")
 HF_CACHE_DIR = Path(os.environ.get("HF_CACHE_DIR", "/tmp/hf_cache"))
 TRAIN_SPLIT = os.environ.get("TRAIN_SPLIT", "train")
-EVAL_SPLIT = os.environ.get("EVAL_SPLIT", None)
+EVAL_SPLIT = os.environ.get("EVAL_SPLIT", "validation")
 
 def optional_nonnegative_int(name: str, default: Optional[int] = None) -> Optional[int]:
     value = os.environ.get(name, str(default))
@@ -139,12 +139,12 @@ def optional_string_list(name: str, default: Optional[str] = None) -> list[str]:
     return [item.strip() for item in parsed if item.strip()]
 
 TRAIN_MIN_IDX = optional_nonnegative_int("TRAIN_MIN_IDX")
-TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX", 100)
+TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX")
 EVAL_MIN_IDX = optional_nonnegative_int("EVAL_MIN_IDX")
 EVAL_MAX_IDX = optional_nonnegative_int("EVAL_MAX_IDX")
 SOURCE_OPTIONS = {
     TRAIN_SPLIT: {
-        "include": optional_string_list("TRAIN_INCLUDE_SOURCES", '["nvidia-nemotron-model-reasoning-challenge", "dgxchen/nemotron-cot-tong"]'),
+        "include": optional_string_list("TRAIN_INCLUDE_SOURCES", '["nvidia-nemotron-model-reasoning-challenge", "dgxchen/nemotron-cot-tong", "BytedTsinghua-SIA/Enigmata-Eval"]'),
         "order": optional_string_list("TRAIN_ORDER_BY_SOURCES"),
         "exclude": optional_string_list("TRAIN_EXCLUDE_SOURCES"),
         "order_remaining": os.environ.get(
@@ -153,7 +153,7 @@ SOURCE_OPTIONS = {
         ).lower() not in {"0", "false", "no"},
     },
     EVAL_SPLIT: {
-        "include": optional_string_list("EVAL_INCLUDE_SOURCES"),
+        "include": optional_string_list("EVAL_INCLUDE_SOURCES", '["BytedTsinghua-SIA/Enigmata-Eval"]'),
         "order": optional_string_list("EVAL_ORDER_BY_SOURCES"),
         "exclude": optional_string_list("EVAL_EXCLUDE_SOURCES"),
         "order_remaining": os.environ.get(
@@ -162,7 +162,7 @@ SOURCE_OPTIONS = {
         ).lower() not in {"0", "false", "no"},
     },
 }
-TRAIN_SHUFFLE = os.environ.get("TRAIN_SHUFFLE", "0").lower() not in {
+TRAIN_SHUFFLE = os.environ.get("TRAIN_SHUFFLE", "1").lower() not in {
     "0",
     "false",
     "no",
@@ -173,14 +173,14 @@ EVAL_SHUFFLE = os.environ.get("EVAL_SHUFFLE", "0").lower() not in {
     "no",
 }
 FILTER_HQ_BY_SPLIT = {
-    TRAIN_SPLIT: os.environ.get("TRAIN_FILTER_HQ", "1").lower()
+    TRAIN_SPLIT: os.environ.get("TRAIN_FILTER_HQ", "0").lower()
         not in {"0", "false", "no"},
-    EVAL_SPLIT: os.environ.get("EVAL_FILTER_HQ", "1").lower()
+    EVAL_SPLIT: os.environ.get("EVAL_FILTER_HQ", "0").lower()
         not in {"0", "false", "no"},
 }
 
 TRAIN_STAGE = os.environ.get("TRAIN_STAGE", "dpo")
-TRAIN_VERSION = os.environ.get("TRAIN_VERSION", "v1")
+TRAIN_VERSION = os.environ.get("TRAIN_VERSION", "v6")
 RUN_NAME = os.environ.get("RUN_NAME", f"nemotron-{TRAIN_STAGE}-{TRAIN_VERSION}")
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", str(WORKING_DIR / RUN_NAME)))
 ADAPTER_OUTPUT_DIR = Path(
@@ -229,7 +229,7 @@ GRADIENT_ACCUMULATION_STEPS = int(
 )
 NUM_TRAIN_EPOCHS = float(os.environ.get("NUM_TRAIN_EPOCHS", "2"))
 MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))
-LEARNING_RATE = float(os.environ.get("LEARNING_RATE", "1e-6"))
+LEARNING_RATE = float(os.environ.get("LEARNING_RATE", "2e-6"))
 WARMUP_RATIO = float(os.environ.get("WARMUP_RATIO", "0.03"))
 LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "1"))
 SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "5"))
@@ -274,6 +274,8 @@ if REPORT_TO == "wandb":
     os.environ["WANDB_DIR"] = str(wandb_dir)
     os.environ.setdefault("WANDB_SILENT", "true")
 
+HAS_DIGIT_RE = re.compile(r"\d")
+
 
 
 
@@ -311,6 +313,9 @@ def is_high_quality_example(example: dict[str, Any]) -> bool:
     if example.get("response") and not example.get("reasoning"):
         return False
     if example.get("source") in HQ_SOURCES:
+        return True
+    if (example.get("source").casefold() == "BytedTsinghua-SIA/Enigmata-Eval".casefold() 
+        and HAS_DIGIT_RE.search(example.get("final_answer"))):
         return True
     answer_type = clean_text(example.get("answer_type"))
     if answer_type is not None and answer_type.lower() in HQ_ANSWER_TYPES:

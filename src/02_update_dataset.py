@@ -294,7 +294,7 @@ CANDIDATE_SELECTION_OPTIONS = {
 }
 SOURCE_OPTIONS = {
     "train": {
-        "include": optional_string_list("TRAIN_INCLUDE_SOURCES", '["nvidia-nemotron-model-reasoning-challenge", "dgxchen/nemotron-cot-tong"]'),
+        "include": optional_string_list("TRAIN_INCLUDE_SOURCES", '["nvidia-nemotron-model-reasoning-challenge", "dgxchen/nemotron-cot-tong", "BytedTsinghua-SIA/Enigmata-Eval"]'),
         "order": optional_string_list("TRAIN_ORDER_BY_SOURCES"),
         "exclude": optional_string_list("TRAIN_EXCLUDE_SOURCES"),
         "order_remaining": os.environ.get(
@@ -303,7 +303,7 @@ SOURCE_OPTIONS = {
         ).lower() not in {"0", "false", "no"},
     },
     "validation": {
-        "include": optional_string_list("VALIDATION_INCLUDE_SOURCES"),
+        "include": optional_string_list("VALIDATION_INCLUDE_SOURCES", '["BytedTsinghua-SIA/Enigmata-Eval"]'),
         "order": optional_string_list("VALIDATION_ORDER_BY_SOURCES"),
         "exclude": optional_string_list("VALIDATION_EXCLUDE_SOURCES"),
         "order_remaining": os.environ.get(
@@ -312,7 +312,7 @@ SOURCE_OPTIONS = {
         ).lower() not in {"0", "false", "no"},
     },
     "test": {
-        "include": optional_string_list("TEST_INCLUDE_SOURCES"),
+        "include": optional_string_list("TEST_INCLUDE_SOURCES", '["BytedTsinghua-SIA/Enigmata-Eval"]'),
         "order": optional_string_list("TEST_ORDER_BY_SOURCES"),
         "exclude": optional_string_list("TEST_EXCLUDE_SOURCES"),
         "order_remaining": os.environ.get(
@@ -411,6 +411,7 @@ FALLBACK_ANSWER_PATTERNS = [
 ]
 NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
 BINARY_RE = re.compile(r"[01]+")
+HAS_DIGIT_RE = re.compile(r"\d")
 
 BACKUP_FIELDS = (
     "split",
@@ -455,6 +456,9 @@ def is_high_quality_example(example: dict[str, Any]) -> bool:
     if example.get("response") and not example.get("reasoning"):
         return False
     if example.get("source") in HQ_SOURCES:
+        return True
+    if (example.get("source").casefold() == "BytedTsinghua-SIA/Enigmata-Eval".casefold() 
+        and HAS_DIGIT_RE.search(example.get("final_answer"))):
         return True
     answer_type = clean_text(example.get("answer_type"))
     if answer_type is not None and answer_type.lower() in HQ_ANSWER_TYPES:
