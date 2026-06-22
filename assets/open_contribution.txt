@@ -39,3 +39,33 @@ GitHub project link: https://github.com/the-submitter/nvidia-nemotron
 
 -------------------
 
+DPO (Direct Preference Optimization) was performed using Unsloth, building on the SFT fine-tuned LoRA adapter and using the DPO updated dataset for chosen/rejected completions.
+link: https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-dpo
+description:
+DPO Training Overview
+Continues the SFT LoRA adapter with direct preference optimization.
+Filters rows with non-empty chosen/rejected fields and formats prompt/completion pairs for DPO.
+Uses Unsloth model loading and TRL DPOTrainer with configurable beta, loss type, and reference log-prob handling.
+Saves the continued adapter and optional Hugging Face/Kaggle artifacts.
+
+Experimental GSPO (GRPO) RL was attempted using Unsloth and TRL, but was unsuccessful.
+Unsloth variant:
+link: https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-grpo-gspo-unsloth?scriptVersionId=329178155
+description:
+Unsloth GSPO/GRPO Overview
+Experiments with GSPO/GRPO using Unsloth model loading, TRL GRPOTrainer, and colocated vLLM.
+Builds reward-ready prompts with source, HQ, DPO-aware, and remaining-source ordering controls.
+Combines exact answer verification, fuzzy matching, completion similarity, boxed formatting, and think-tag rewards.
+Kept as an experimental path because Kaggle runs hit Unsloth/vLLM state dict synchronization issues with the nvidia nemotron model.
+vLLM path hit Unsloth state-dict mapping/sync issues; Transformers fallback was too slow.
+
+TRL variant:
+link: https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-grpo-gspo-trl
+description:
+Native TRL GSPO/GRPO Overview
+Runs the GSPO/GRPO experiment with native Transformers, PEFT, TRL, and colocated vLLM.
+Keeps the same dataset preparation, ordering controls, reward logic, and artifact flow as the Unsloth variant.
+Loads or resumes LoRA adapters with PEFT and trains via TRL GRPOTrainer.
+Kept as the cleaner native path, though recorded Kaggle attempts hit colocated-vLLM CUDA OOM.
+
+GitHub project link: https://github.com/the-submitter/nvidia-nemotron

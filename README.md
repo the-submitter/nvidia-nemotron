@@ -5,8 +5,8 @@ Training and dataset-building pipeline for NVIDIA Nemotron reasoning experiments
 ## Published Artifacts
 
 **Dataset**
-- Hugging Face: `the-submitter/nemotron-reasoning`
-- Kaggle: `rohitraje0493/nemotron-reasoning`
+- Hugging Face: [`the-submitter/nemotron-reasoning`](https://huggingface.co/datasets/the-submitter/nemotron-reasoning)
+- Kaggle: [`rohitraje0493/nemotron-reasoning`](https://www.kaggle.com/datasets/rohitraje0493/nemotron-reasoning)
 
 **SFT**
 - Best noted run: `v7`, public `0.836`, private `0.852`
@@ -14,9 +14,9 @@ Training and dataset-building pipeline for NVIDIA Nemotron reasoning experiments
 - Kaggle: [`nemotron-3-nano/transformers/lora-sft/7`](https://www.kaggle.com/models/rohitraje0493/nemotron-3-nano/Transformers/lora-sft/7)
 
 **DPO**
-- Best noted run: `v5`, public `0.836`, private `0.856`
-- Hugging Face: [`the-submitter/nemotron-lora-dpo-v3`](https://huggingface.co/the-submitter/nemotron-lora-dpo-v3)
-- Kaggle: [`nemotron-3-nano/transformers/lora-dpo/5`](https://www.kaggle.com/models/rohitraje0493/nemotron-3-nano/Transformers/lora-dpo/5)
+- Best noted run: `v9`, public `0.844`, private `0.856`
+- Hugging Face: [`the-submitter/nemotron-lora-dpo-v7`](https://huggingface.co/the-submitter/nemotron-lora-dpo-v7)
+- Kaggle: [`nemotron-3-nano/transformers/lora-dpo/9`](https://www.kaggle.com/models/rohitraje0493/nemotron-3-nano/transformers/lora-dpo)
 
 ## Repository Layout
 
@@ -242,14 +242,14 @@ GRPO scripts also support:
 - `*_DPO_AWARE`: prioritize samples by available preference metadata.
 - `*_DPO_SORT_REMAINING`: with `*_ORDER_REMAINING=0`, preserve remaining-source mix while sorting rows within each remaining source by DPO priority.
 
-## Kaggle Notebook Run Notes
+## Kaggle Notebook Run Notes (`notebooks/*.ipynb`)
 
 - `00_create_dataset.ipynb`: Create Dataset, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-create-dataset`: Version 19.
 - `01_sft.ipynb`: SFT Train, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-sft`: Version 11.
 - `02_update_dataset.ipynb`: Update Dataset, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-update-dataset`: Version 12.
-- `03_dpo.ipynb`: DPO Train, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-dpo?scriptVersionId=327472670`: Version 5.
-- `04_grpo_gspo_unsloth.ipynb`: GSPO Train Unsloth, vLLM path hit Unsloth state-dict mapping/sync issues; Transformers fallback was too slow.
-- `04_grpo_gspo_trl.ipynb`: GSPO Train TRL, colocated vLLM path hit CUDA OOM.
+- `03_dpo.ipynb`: DPO Train, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-dpo`: Version 11.
+- `04_grpo_gspo_unsloth.ipynb`: GSPO Train Unsloth, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-grpo-gspo-unsloth?scriptVersionId=329178155`: vLLM path hit Unsloth state-dict mapping/sync issues; Transformers fallback was too slow.
+- `04_grpo_gspo_trl.ipynb`: GSPO Train TRL, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-grpo-gspo-trl`: colocated vLLM path hit CUDA OOM.
 
 ## Practical Notes
 
