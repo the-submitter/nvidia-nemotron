@@ -17,6 +17,7 @@ venv/
 
 # Data
 data/
+backup/
 
 # AI Agents
 .codex

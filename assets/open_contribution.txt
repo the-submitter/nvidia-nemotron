@@ -1,0 +1,41 @@
+The dataset was created in 2 phases. Phase 1 creates the base consolidated dataset from about 15 sources while phase 2 updates the base dataset with DPO preference fields i.e. chosen/rejected completions.
+
+Phase 1: Create Dataset
+link: https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-create-dataset
+description: 
+Dataset Creation Overview
+Builds the canonical Nemotron reasoning DatasetDict consumed by SFT, preference generation, DPO, and GRPO/GSPO stages.
+Normalizes Hugging Face, Kaggle, and local sources into a shared schema with prompt, reasoning, response, final answer, and metadata fields.
+Supports streaming selection, length ranking, per-source quotas, per-dataset dedupe, global dedupe, high-quality filtering, and deterministic split shuffling.
+Validates schema and identifiers, saves the final dataset locally, and optionally publishes to Hugging Face and Kaggle.
+
+Sources Used
+- Hugging Face datasets: NuminaMath, competition_math, OpenR1-Math, GSM8K, SVAMP, ASDiv, DROP, ProofWriter, FOLIO, ProntoQA, ZebraLogic, Enigmata, OpenMathReasoning.
+- Local/Kaggle inputs: Nemotron COT Tong and NVIDIA Nemotron model reasoning challenge data.
+
+Phase 2: Update Dataset
+link: https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-update-dataset
+description:
+Preference Update Overview
+Generates DPO preference fields for prompts that need chosen/rejected completions.
+Selects candidates with source ordering, HQ filters, range/take limits, and resumable DPO bookkeeping.
+Runs vLLM trajectories, extracts/verifies final answers, and chooses shortest correct/wrong completions.
+Persists incremental split snapshots, optional CSV backups, and updated upload-ready datasets.
+
+GitHub project link: https://github.com/the-submitter/nvidia-nemotron
+
+-------------------
+
+SFT (Supervised Fine-Tuning) was performed using Unsloth over a consolidated dataset (from about 15 sources).
+link: https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-sft
+description:
+SFT Training Overview
+Runs supervised fine-tuning on response-ready examples from the unified reasoning dataset.
+Applies source controls, high-quality filters, index ranges, and chat-style formatting before training.
+Loads Nemotron through Unsloth, creates or resumes a LoRA adapter, and trains with TRL SFTTrainer.
+Saves trainer state, adapter weights, tokenizer files, and optional Hugging Face/Kaggle uploads.
+
+GitHub project link: https://github.com/the-submitter/nvidia-nemotron
+
+-------------------
+

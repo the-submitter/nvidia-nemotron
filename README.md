@@ -10,13 +10,13 @@ Training and dataset-building pipeline for NVIDIA Nemotron reasoning experiments
 
 **SFT**
 - Best noted run: `v7`, public `0.836`, private `0.852`
-- Hugging Face: `the-submitter/nemotron-lora-sft-v2`
-- Kaggle: `nemotron-3-nano/transformers/lora-sft/7`
+- Hugging Face: [`the-submitter/nemotron-lora-sft-v2`](https://huggingface.co/the-submitter/nemotron-lora-sft-v2)
+- Kaggle: [`nemotron-3-nano/transformers/lora-sft/7`](https://www.kaggle.com/models/rohitraje0493/nemotron-3-nano/Transformers/lora-sft/7)
 
 **DPO**
 - Best noted run: `v5`, public `0.836`, private `0.856`
-- Hugging Face: `the-submitter/nemotron-lora-dpo-v3`
-- Kaggle: `nemotron-3-nano/transformers/lora-dpo/5`
+- Hugging Face: [`the-submitter/nemotron-lora-dpo-v3`](https://huggingface.co/the-submitter/nemotron-lora-dpo-v3)
+- Kaggle: [`nemotron-3-nano/transformers/lora-dpo/5`](https://www.kaggle.com/models/rohitraje0493/nemotron-3-nano/Transformers/lora-dpo/5)
 
 ## Repository Layout
 
