@@ -18,9 +18,7 @@
 from __future__ import annotations
 
 import json
-import math
 import os
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -74,7 +72,6 @@ wheels_dir = "/kaggle/input/datasets/rohitraje0493/nemo-rl-vllm-wheels/packages"
 #     "antlr4-python3-runtime==4.11.0" \
 #     "protobuf<6.0.0" \
 #     --no-index --find-links={wheels_dir}
-# If cached wheels are unavailable, install NeMo-RL from NVIDIA-NeMo/RL in a separate setup cell.
 
 
 
@@ -222,52 +219,10 @@ KAGGLE_DATASET_REPO = os.environ.get(
     f"{KAGGLE_USERNAME}/nemotron-{TRAIN_STAGE}",
 )
 
-MAX_SEQ_LENGTH = int(os.environ.get("MAX_SEQ_LENGTH", "8192"))
-MAX_PROMPT_LENGTH = int(os.environ.get("MAX_PROMPT_LENGTH", "4096"))
-MAX_COMPLETION_LENGTH = int(
-    os.environ.get(
-        "MAX_COMPLETION_LENGTH",
-        "7680",
-        # str(MAX_SEQ_LENGTH - MAX_PROMPT_LENGTH),
-    )
-)
-if MAX_PROMPT_LENGTH <= 0 or MAX_COMPLETION_LENGTH <= 0:
-    raise ValueError("Prompt and completion lengths must be positive")
-
 DATASET_WORKERS = max(1, int(os.environ.get("DATASET_NUM_PROC", "8")))
 DATASET_NUM_PROC = DATASET_WORKERS if DATASET_WORKERS > 1 else None
 SEED = int(os.environ.get("SEED", "3407"))
 
-PER_DEVICE_TRAIN_BATCH_SIZE = int(
-    os.environ.get("PER_DEVICE_TRAIN_BATCH_SIZE", "2")
-)
-PER_DEVICE_EVAL_BATCH_SIZE = int(os.environ.get("PER_DEVICE_EVAL_BATCH_SIZE", "2"))
-GRADIENT_ACCUMULATION_STEPS = int(
-    os.environ.get("GRADIENT_ACCUMULATION_STEPS", "4")
-)
-GENERATION_BATCH_SIZE = optional_nonnegative_int("GENERATION_BATCH_SIZE")
-STEPS_PER_GENERATION = optional_nonnegative_int("STEPS_PER_GENERATION")
-NUM_TRAIN_EPOCHS = float(os.environ.get("NUM_TRAIN_EPOCHS", "1"))
-MAX_STEPS = int(os.environ.get("MAX_STEPS", "100"))
-LEARNING_RATE = float(os.environ.get("LEARNING_RATE", "5e-6"))
-WARMUP_RATIO = float(os.environ.get("WARMUP_RATIO", "0.03"))
-LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "1"))
-SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "5"))
-EVAL_STEPS = int(os.environ.get("EVAL_STEPS", str(SAVE_STEPS)))
-SAVE_TOTAL_LIMIT = int(os.environ.get("SAVE_TOTAL_LIMIT", "2"))
-LORA_R = int(os.environ.get("LORA_R", "32"))
-LORA_ALPHA = int(os.environ.get("LORA_ALPHA", "32"))
-MAX_LORA_RANK = int(os.environ.get("MAX_LORA_RANK", "32"))
-
-NUM_GENERATIONS = int(os.environ.get("NUM_GENERATIONS", "4"))
-TEMPERATURE = float(os.environ.get("TEMPERATURE", "1.0"))
-TOP_P = float(os.environ.get("TOP_P", "1.0"))
-TOP_K = optional_nonnegative_int("TOP_K")
-GRPO_BETA = float(os.environ.get("GRPO_BETA", "0.0"))
-GRPO_LOSS_TYPE = os.environ.get("GRPO_LOSS_TYPE", "dr_grpo")
-VLLM_GPU_MEMORY_UTILIZATION = float(
-    os.environ.get("VLLM_GPU_MEMORY_UTILIZATION", "0.95")
-)
 MATH_VERIFY_TIMEOUT_SECONDS = int(
     os.environ.get("MATH_VERIFY_TIMEOUT_SECONDS", "5")
 )
@@ -283,7 +238,6 @@ BOXED_WEIGHT = float(os.environ.get("BOXED_WEIGHT", "1.0"))
 THINK_WEIGHT = float(os.environ.get("THINK_WEIGHT", "0.25"))
 
 REPORT_TO = os.environ.get("REPORT_TO", "wandb")
-RESUME_FROM_CHECKPOINT = os.environ.get("RESUME_FROM_CHECKPOINT", "0")
 PUSH_TO_HUB = os.environ.get("PUSH_TO_HUB", "0").lower() not in {
     "0",
     "false",
@@ -304,16 +258,6 @@ BOXED_ANSWER_INSTRUCTION = (
     "\nPlease put your final answer inside `\\boxed{}`. "
     "For example: `\\boxed{your answer}`"
 )
-BOXED_START_RE = re.compile(r"\\boxed\{")
-THINK_RE = re.compile(r"<think>(.*?)</think>", re.IGNORECASE | re.DOTALL)
-FALLBACK_ANSWER_PATTERNS = [
-    re.compile(r"The final answer is:\s*([^\n]+)", re.IGNORECASE),
-    re.compile(r"Final answer is:\s*([^\n]+)", re.IGNORECASE),
-    re.compile(r"Final answer\s*[:：]\s*([^\n]+)", re.IGNORECASE),
-    re.compile(r"final answer\s*[:：]\s*([^\n]+)", re.IGNORECASE),
-]
-NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
-BINARY_RE = re.compile(r"[01]+")
 
 if REPORT_TO == "wandb":
     os.environ.setdefault("WANDB_MODE", "offline")
@@ -333,12 +277,11 @@ if REPORT_TO == "wandb":
 #   later.
 
 # %%
-def clean_text(value: Any) -> Optional[str]:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
+from nemo_bridge.nemotron_reward_utils import (
+    clean_text,
+    combine_reasoning_response,
+    unified_reward,
+)
 
 HQ_SOURCES = {
     "nvidia-nemotron-model-reasoning-challenge",
@@ -741,265 +684,6 @@ def prepare_datasets():
 
 
 # %% [markdown]
-# ## Answer Extraction and Rewards
-# - Extract boxed or fallback final answers and verify them against references.
-# - Compute reward components for exactness, fuzzy similarity, boxed formatting, and
-#   reasoning tags.
-
-# %%
-import math_verify
-from rapidfuzz import fuzz, utils
-
-def extract_competition_boxed_answer(text: Any) -> Optional[str]:
-    if not text:
-        return None
-    value = str(text)
-    boxed_starts = list(BOXED_START_RE.finditer(value))
-    matches = []
-    for index, match in enumerate(boxed_starts):
-        start = match.end()
-        end = (
-            boxed_starts[index + 1].start()
-            if index + 1 < len(boxed_starts)
-            else len(value)
-        )
-        segment = value[start:end]
-        last_brace = segment.rfind("}")
-        matches.append(segment[:last_brace] if last_brace != -1 else segment)
-    if not matches:
-        return None
-    non_empty = [match.strip() for match in matches if match.strip()]
-    return non_empty[-1] if non_empty else matches[-1].strip()
-
-
-def extract_boxed_spans(text: Any) -> list[tuple[int, int, str]]:
-    if not text:
-        return []
-    value = str(text)
-    spans: list[tuple[int, int, str]] = []
-    cursor = 0
-    marker = r"\boxed{"
-    while True:
-        start = value.find(marker, cursor)
-        if start < 0:
-            break
-        content_start = start + len(marker)
-        depth = 1
-        index = content_start
-        while index < len(value) and depth:
-            if value[index] == "{":
-                depth += 1
-            elif value[index] == "}":
-                depth -= 1
-            index += 1
-        if depth == 0:
-            spans.append((start, index, value[content_start : index - 1]))
-            cursor = index
-        else:
-            cursor = content_start
-    return spans
-
-
-def extract_balanced_boxed_answer(text: Any) -> Optional[str]:
-    spans = extract_boxed_spans(text)
-    if not spans:
-        return None
-    non_empty = [
-        answer.strip()
-        for _start, _end, answer in spans
-        if answer.strip()
-    ]
-    return non_empty[-1] if non_empty else spans[-1][2].strip()
-
-
-def extract_fallback_answer(text: Any) -> Optional[str]:
-    value = clean_text(text)
-    if value is None:
-        return None
-    for pattern in FALLBACK_ANSWER_PATTERNS:
-        matches = pattern.findall(value)
-        if matches:
-            return matches[-1].strip()
-    matches = NUMBER_RE.findall(value)
-    if matches:
-        return matches[-1]
-    lines = [line.strip() for line in value.splitlines() if line.strip()]
-    return lines[-1] if lines else None
-
-
-def extract_final_answers(text: Any) -> list[Optional[str]] | Optional[str]:
-    boxed_answers = [
-        extract_competition_boxed_answer(text),
-        extract_balanced_boxed_answer(text),
-    ]
-    if any(clean_text(answer) is not None for answer in boxed_answers):
-        return boxed_answers
-    fallback_answer = extract_fallback_answer(text)
-    return fallback_answer
-
-
-def verify(stored_answer: Any, predicted: Any) -> bool:
-    stored = clean_text(stored_answer)
-    prediction = clean_text(predicted)
-    if not stored:
-        return not prediction
-
-    if BINARY_RE.fullmatch(stored):
-        return prediction.casefold() == stored.casefold()
-
-    try:
-        if math.isclose(
-            float(stored),
-            float(prediction),
-            rel_tol=1e-2,
-            abs_tol=1e-5,
-        ):
-            return True
-    except Exception:
-        pass
-
-    try:
-        if math_verify.verify(
-            math_verify.parse(stored),
-            math_verify.parse(prediction),
-            float_rounding=2,
-            numeric_precision=2,
-            strict=True,
-            allow_set_relation_comp=True,
-            timeout_seconds=MATH_VERIFY_TIMEOUT_SECONDS,
-        ):
-            return True
-    except Exception:
-        pass
-
-    return prediction.casefold() == stored.casefold()
-
-
-def combine_reasoning_response(reasoning: Any, response: Any) -> Optional[str]:
-    normalized_response = clean_text(response)
-    if normalized_response is None:
-        return None
-    normalized_reasoning = clean_text(reasoning)
-    if normalized_reasoning is None:
-        return normalized_response
-    return (
-        f"<think>\n{normalized_reasoning}\n</think>\n"
-        f"{normalized_response}"
-    )
-
-
-def completion_text(completion: Any) -> str:
-    if isinstance(completion, str):
-        return completion
-    if isinstance(completion, dict):
-        return str(completion.get("content") or "")
-    # if isinstance(completion, list):
-    #     return "".join(
-    #         str(message.get("content") or "")
-    #         for message in completion
-    #         if isinstance(message, dict)
-    #     )
-    try:
-        return str(completion[0].get("content", ""))
-    except Exception:
-        pass
-    return str(completion or "")
-
-
-def normalized_fuzzy_score(gold: Any, target: Any) -> float:
-    if gold is None:
-        return 0.0
-    gold_text = utils.default_process(clean_text(gold) or "")
-    target_text = utils.default_process(clean_text(target) or "")
-    return fuzz.ratio(gold_text, target_text) / 100.0
-
-
-def normalized_token_set_score(gold: Any, target: Any) -> float:
-    if gold is None:
-        return 0.0
-    gold_text = utils.default_process(clean_text(gold) or "")
-    target_text = utils.default_process(clean_text(target) or "")
-    return fuzz.token_set_ratio(gold_text, target_text) / 100.0
-
-
-def unified_reward(
-    prompts,
-    completions,
-    response,
-    reasoning,
-    final_answer,
-    **kwargs,
-) -> list[float]:
-    scores: list[float] = []
-
-    for completion, reference_response, reference_reasoning, target in zip(
-        completions,
-        response,
-        reasoning,
-        final_answer,
-        strict=True,
-    ):
-        text = completion_text(completion)
-        normalized_text = text.casefold()
-        if "</think>" in normalized_text and "<think>" not in normalized_text:
-            text = f"<think>\n{text}"
-
-        extracted_answers = extract_final_answers(text)
-
-        if isinstance(extracted_answers, list):
-            boxed_answers = extracted_answers
-        else:
-            extracted_answers = [extracted_answers]
-            boxed_answers = [None]
-
-        exact_score = max(
-            (
-                1.0 if verify(target, extracted_answer) else 0.0
-                for extracted_answer in extracted_answers
-            ),
-            default=0.0,
-        )
-        answer_fuzzy_score = max(
-            (
-                normalized_fuzzy_score(target, extracted_answer)
-                for extracted_answer in extracted_answers
-            ),
-            default=0.0,
-        )
-        boxed_score = max(
-            (
-                1.0 if clean_text(extracted_answer) is not None else 0.0
-                for extracted_answer in boxed_answers
-            ),
-            default=0.0,
-        )
-        reference_completion = combine_reasoning_response(
-            reference_reasoning,
-            reference_response,
-        )
-        completion_fuzzy_score = normalized_token_set_score(
-            reference_completion,
-            text,
-        )
-        think_matches = [
-            match.group(1).strip()
-            for match in THINK_RE.finditer(text)
-        ]
-        think_score = 1.0 if any(think_matches) else 0.0
-
-        scores.append(
-            EXACT_MATCH_WEIGHT * exact_score
-            + ANSWER_FUZZY_WEIGHT * answer_fuzzy_score
-            + COMPLETION_FUZZY_WEIGHT * completion_fuzzy_score
-            + BOXED_WEIGHT * boxed_score
-            + THINK_WEIGHT * think_score
-        )
-    return scores
-
-
-
-
-# %% [markdown]
 # ## Adapter Input Preparation
 # - Resolve an optional PEFT adapter path from a Kaggle input or local folder.
 # - Normalize adapter metadata when a Kaggle-local base model path replaces the original model id.
@@ -1038,17 +722,6 @@ def prepare_adapter_input_path() -> Optional[str]:
     return str(adapter_path)
 
 
-def resolve_resume_from_checkpoint() -> bool | str | None:
-    if RESUME_FROM_CHECKPOINT is None:
-        return None
-    normalized = RESUME_FROM_CHECKPOINT.strip()
-    if normalized.lower() in {"1", "true", "yes"}:
-        return True
-    if normalized.lower() in {"0", "false", "no", ""}:
-        return None
-    return normalized
-
-
 
 
 # %% [markdown]
@@ -1064,27 +737,7 @@ NEMO_RL_DIR = Path(os.environ.get("NEMO_RL_DIR", str(WORKING_DIR / "nemo-rl")))
 NEMO_CONFIG_PATH = Path(
     os.environ.get("NEMO_CONFIG_PATH", "configs/grpo_gspo_nemotron.yaml")
 )
-NEMO_BRIDGE_DIR = Path(__file__).resolve().parent / "nemo_bridge"
-NEMO_TASK_NAME = os.environ.get("NEMO_TASK_NAME", "nemotron_reasoning")
-NEMO_PROCESSOR_NAME = os.environ.get(
-    "NEMO_PROCESSOR_NAME",
-    "nemotron_grpo_data_processor",
-)
-NEMO_ENV_NAME = os.environ.get("NEMO_ENV_NAME", "nemotron_unified_reward")
-NEMO_ENV_NUM_WORKERS = int(os.environ.get("NEMO_ENV_NUM_WORKERS", "1"))
-NEMO_TRAIN_GLOBAL_BATCH_SIZE = int(
-    os.environ.get(
-        "NEMO_TRAIN_GLOBAL_BATCH_SIZE",
-        str(max(PER_DEVICE_TRAIN_BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS, 1)),
-    )
-)
-NEMO_GENERATION_BATCH_SIZE = int(
-    os.environ.get("NEMO_GENERATION_BATCH_SIZE", str(GENERATION_BATCH_SIZE))
-)
-NEMO_TENSOR_PARALLEL_SIZE = int(os.environ.get("NEMO_TENSOR_PARALLEL_SIZE", "1"))
-NEMO_PIPELINE_PARALLEL_SIZE = int(os.environ.get("NEMO_PIPELINE_PARALLEL_SIZE", "1"))
-NEMO_SEQUENCE_LEVEL_IS = bool_env("NEMO_SEQUENCE_LEVEL_IS", True)
-NEMO_NORMALIZE_REWARDS = bool_env("NEMO_NORMALIZE_REWARDS", False)
+NEMO_BRIDGE_DIR = Path(globals().get("__file__", Path.cwd() / "src" / "04_grpo_gspo_nemo_rl.py")).resolve().parent / "nemo_bridge"
 NEMO_RUN_TRAIN = bool_env("NEMO_RUN_TRAIN", True)
 
 
