@@ -22,6 +22,7 @@ import math
 import os
 import re
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
@@ -133,6 +134,12 @@ def optional_string_list(name: str, default: Optional[str] = None) -> list[str]:
     ):
         raise ValueError(f"{name} must be a JSON list or comma-separated strings")
     return [item.strip() for item in parsed if item.strip()]
+
+def bool_env(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"", "0", "false", "no", "none", "null"}
 
 TRAIN_MIN_IDX = optional_nonnegative_int("TRAIN_MIN_IDX")
 TRAIN_MAX_IDX = optional_nonnegative_int("TRAIN_MAX_IDX", 9500)
@@ -1053,20 +1060,17 @@ def resolve_resume_from_checkpoint() -> bool | str | None:
 NEMO_DATA_DIR = Path(os.environ.get("NEMO_DATA_DIR", WORKING_DIR / "nemo_rl_data"))
 NEMO_TRAIN_JSONL = NEMO_DATA_DIR / "train.jsonl"
 NEMO_EVAL_JSONL = NEMO_DATA_DIR / "validation.jsonl"
-NEMO_BASE_CONFIG = os.environ.get(
-    "NEMO_BASE_CONFIG",
-    "examples/configs/grpo_math_1B.yaml",
+NEMO_RL_DIR = Path(os.environ.get("NEMO_RL_DIR", str(WORKING_DIR / "nemo-rl")))
+NEMO_CONFIG_PATH = Path(
+    os.environ.get("NEMO_CONFIG_PATH", "configs/grpo_gspo_nemotron.yaml")
 )
+NEMO_BRIDGE_DIR = Path(__file__).resolve().parent / "nemo_bridge"
 NEMO_TASK_NAME = os.environ.get("NEMO_TASK_NAME", "nemotron_reasoning")
 NEMO_PROCESSOR_NAME = os.environ.get(
     "NEMO_PROCESSOR_NAME",
     "nemotron_grpo_data_processor",
 )
 NEMO_ENV_NAME = os.environ.get("NEMO_ENV_NAME", "nemotron_unified_reward")
-NEMO_ENV_FQN = os.environ.get(
-    "NEMO_ENV_FQN",
-    f"{__name__}.NemotronUnifiedRewardEnvironment",
-)
 NEMO_ENV_NUM_WORKERS = int(os.environ.get("NEMO_ENV_NUM_WORKERS", "1"))
 NEMO_TRAIN_GLOBAL_BATCH_SIZE = int(
     os.environ.get(
@@ -1101,8 +1105,10 @@ def nemo_jsonl_record(example: dict[str, Any]) -> dict[str, Any]:
     return {
         "input": prompt,
         "output": reference_completion,
-        "messages": [{"role": "user", "content": prompt}],
-        "task_name": NEMO_TASK_NAME,
+        "messages": [
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": reference_completion},
+        ],
         "final_answer": example.get("final_answer"),
         "reasoning": example.get("reasoning"),
         "response": example.get("response"),
@@ -1132,265 +1138,56 @@ def prepare_nemo_jsonl_datasets(train_dataset, eval_dataset):
 
 
 # %% [markdown]
-# ## NeMo-RL Processor and Reward Environment
-# - Register a custom `ResponseDataset` processor that carries reward metadata into `extra_env_info`.
-# - Implement a Ray environment that scores generated assistant completions with `unified_reward()`.
+# ## NeMo-RL Config and Bridge
+# - Resolve the static NeMo-RL YAML config used by `examples/run_grpo.py --config`.
+# - Validate that the exported JSONL paths match the static config before launch.
 
 # %%
-def nemotron_grpo_data_processor(
-    datum_dict: dict[str, Any],
-    task_data_spec: Any,
-    tokenizer: Any,
-    max_seq_length: int,
-    idx: int,
-) -> dict[str, Any]:
-    import torch
-
-    prompt = str(datum_dict.get("input") or "")
-    system_prompt = getattr(task_data_spec, "system_prompt", None)
-    prompt_template = getattr(task_data_spec, "prompt", None)
-    if prompt_template:
-        prompt = prompt_template.format(prompt)
-
-    messages: list[dict[str, str]] = []
-    if system_prompt:
-        messages.append({"role": "system", "content": str(system_prompt)})
-    messages.append({"role": "user", "content": prompt})
-
-    rendered_prompt = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-        add_special_tokens=False,
-    )
-    token_ids = tokenizer(
-        rendered_prompt,
-        return_tensors="pt",
-        add_special_tokens=False,
-    )["input_ids"][0]
-    loss_multiplier = 1.0
-    if token_ids.numel() >= max_seq_length:
-        token_ids = token_ids[:max_seq_length]
-        loss_multiplier = 0.0
-
-    return {
-        "message_log": [
-            {
-                "role": "user",
-                "content": rendered_prompt,
-                "token_ids": token_ids,
-            }
-        ],
-        "length": int(token_ids.numel()),
-        "extra_env_info": {
-            "ground_truth": datum_dict.get("final_answer"),
-            "final_answer": datum_dict.get("final_answer"),
-            "reasoning": datum_dict.get("reasoning"),
-            "response": datum_dict.get("response"),
-            "prompt": prompt,
-            "source": datum_dict.get("source"),
-        },
-        "loss_multiplier": torch.tensor(loss_multiplier, dtype=torch.float32),
-        "idx": idx,
-        "task_name": datum_dict.get("task_name", NEMO_TASK_NAME),
-    }
-
-
-def _assistant_completion_from_log(message_log: list[dict[str, Any]]) -> str:
-    assistant_chunks: list[str] = []
-    for message in message_log:
-        if message.get("role") == "assistant":
-            assistant_chunks.append(str(message.get("content") or ""))
-    if assistant_chunks:
-        return "".join(assistant_chunks)
-    if message_log:
-        return str(message_log[-1].get("content") or "")
-    return ""
-
-
-def _metadata_list(metadata: Any, batch_size: int) -> list[dict[str, Any]]:
-    if metadata is None:
-        return [{} for _ in range(batch_size)]
-    if isinstance(metadata, list):
-        return [item if isinstance(item, dict) else {} for item in metadata]
-    if isinstance(metadata, dict):
-        return [metadata for _ in range(batch_size)]
-    return [{} for _ in range(batch_size)]
-
-
-def define_nemotron_reward_environment():
-    import ray
-    import torch
-    from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-    from nemo_rl.environments.interfaces import EnvironmentInterface, EnvironmentReturn
-
-    @ray.remote(num_cpus=1, max_restarts=-1, max_task_retries=-1)
-    class NemotronUnifiedRewardEnvironment(EnvironmentInterface[dict[str, Any]]):
-        def __init__(self, cfg: dict[str, Any] | None = None):
-            self.cfg = cfg or {}
-
-        def step(
-            self,
-            message_log_batch: list[list[dict[str, Any]]],
-            metadata: list[dict[str, Any]] | dict[str, Any] | None = None,
-        ):
-            completions = [
-                _assistant_completion_from_log(message_log)
-                for message_log in message_log_batch
-            ]
-            metadata_batch = _metadata_list(metadata, len(completions))
-            prompts = [str(item.get("prompt") or "") for item in metadata_batch]
-            scores = unified_reward(
-                prompts=prompts,
-                completions=completions,
-                response=[item.get("response") for item in metadata_batch],
-                reasoning=[item.get("reasoning") for item in metadata_batch],
-                final_answer=[item.get("final_answer") for item in metadata_batch],
-            )
-            rewards = torch.tensor(scores, dtype=torch.float32)
-            answers = [extract_final_answer(completion) for completion in completions]
-            return EnvironmentReturn(
-                observations=[
-                    {
-                        "role": "environment",
-                        "content": f"Reward: {float(score):.4f}",
-                    }
-                    for score in scores
-                ],
-                metadata=metadata_batch,
-                next_stop_strings=[None for _ in scores],
-                rewards=rewards,
-                terminateds=torch.ones(len(scores), dtype=torch.bool),
-                answers=answers,
-            )
-
-        def global_post_process_and_metrics(self, batch: BatchedDataDict):
-            rewards = batch.get("rewards") if hasattr(batch, "get") else None
-            if rewards is None:
-                return batch, {}
-            reward_tensor = rewards.detach().float().cpu()
-            metrics = {
-                "reward/mean": float(reward_tensor.mean().item()),
-                "reward/max": float(reward_tensor.max().item()),
-                "reward/min": float(reward_tensor.min().item()),
-                "reward/exactish_rate": float((reward_tensor >= EXACT_MATCH_WEIGHT).float().mean().item()),
-            }
-            return batch, metrics
-
-    globals()["NemotronUnifiedRewardEnvironment"] = NemotronUnifiedRewardEnvironment
-    return NemotronUnifiedRewardEnvironment
-
-
-
-
-# %% [markdown]
-# ## NeMo-RL Configuration Builder
-# - Load a NeMo-RL GRPO YAML config and overlay this project’s model, LoRA, vLLM, and data settings.
-# - Enable colocated vLLM generation and sequence-level importance sampling for GSPO-style updates.
-
-# %%
-def update_config(config: Any, key: str, value: Any) -> None:
-    from omegaconf import OmegaConf
-
-    OmegaConf.update(config, key, value, merge=True, force_add=True)
-
-
-def resolve_nemo_base_config() -> Path:
-    config_path = Path(NEMO_BASE_CONFIG)
-    if config_path.exists():
-        return config_path
-    candidate = Path.cwd() / NEMO_BASE_CONFIG
+def resolve_nemo_config_path() -> Path:
+    if NEMO_CONFIG_PATH.exists():
+        return NEMO_CONFIG_PATH.resolve()
+    candidate = (Path.cwd() / NEMO_CONFIG_PATH).resolve()
     if candidate.exists():
         return candidate
-    raise FileNotFoundError(
-        "Set NEMO_BASE_CONFIG to a valid NeMo-RL GRPO config, for example "
-        "examples/configs/grpo_math_1B.yaml from NVIDIA-NeMo/RL."
-    )
+    raise FileNotFoundError(f"NeMo config not found: {NEMO_CONFIG_PATH}")
 
 
-def build_nemo_config(train_jsonl: Path, eval_jsonl: Path | None):
+def validate_nemo_config_paths(config_path: Path, train_jsonl: Path, eval_jsonl: Path | None) -> None:
     from omegaconf import OmegaConf
 
-    config = OmegaConf.load(resolve_nemo_base_config())
-    adapter_input_path = prepare_adapter_input_path()
-    model_name = adapter_input_path or MODEL_PATH
+    config = OmegaConf.load(config_path)
+    configured_train = Path(str(config.data.train.data_path)).resolve()
+    actual_train = train_jsonl.resolve()
+    if configured_train != actual_train:
+        raise ValueError(
+            "NeMo config train data_path does not match exported JSONL: "
+            f"{configured_train} != {actual_train}. Update {config_path}."
+        )
+    if config.data.validation is None:
+        if eval_jsonl is not None:
+            print("Validation JSONL was exported, but NeMo config validation is null")
+        return
+    if eval_jsonl is None:
+        raise ValueError(
+            f"NeMo config expects validation data at {config.data.validation.data_path}, "
+            "but no eval dataset was exported. Set validation: null or configure EVAL_SPLIT."
+        )
+    configured_eval = Path(str(config.data.validation.data_path)).resolve()
+    actual_eval = eval_jsonl.resolve()
+    if configured_eval != actual_eval:
+        raise ValueError(
+            "NeMo config validation data_path does not match exported JSONL: "
+            f"{configured_eval} != {actual_eval}. Update {config_path}."
+        )
 
-    update_config(config, "grpo.num_generations_per_prompt", NUM_GENERATIONS)
-    update_config(config, "grpo.max_num_steps", MAX_STEPS if MAX_STEPS > 0 else -1)
-    update_config(config, "grpo.max_num_epochs", NUM_TRAIN_EPOCHS)
-    update_config(config, "grpo.val_period", EVAL_STEPS)
-    update_config(config, "grpo.val_at_start", eval_jsonl is not None)
-    update_config(config, "grpo.val_at_end", eval_jsonl is not None)
-    update_config(config, "grpo.normalize_rewards", NEMO_NORMALIZE_REWARDS)
-    update_config(config, "loss_fn.sequence_level_importance_ratios", NEMO_SEQUENCE_LEVEL_IS)
-    update_config(config, "policy.model_name", str(model_name))
-    update_config(config, "policy.tokenizer.name", str(MODEL_PATH))
-    update_config(config, "policy.train_global_batch_size", NEMO_TRAIN_GLOBAL_BATCH_SIZE)
-    update_config(config, "policy.train_micro_batch_size", PER_DEVICE_TRAIN_BATCH_SIZE)
-    update_config(config, "policy.generation_batch_size", NEMO_GENERATION_BATCH_SIZE)
-    update_config(config, "policy.max_total_sequence_length", MAX_SEQ_LENGTH)
-    update_config(config, "policy.max_grad_norm", 0.1)
-    update_config(config, "policy.precision", "bfloat16")
-    update_config(config, "policy.optimizer.name", "torch.optim.AdamW")
-    update_config(config, "policy.optimizer.kwargs.lr", LEARNING_RATE)
-    update_config(config, "policy.optimizer.kwargs.betas", [0.9, 0.99])
-    update_config(config, "policy.optimizer.kwargs.eps", 1e-8)
-    update_config(config, "policy.optimizer.kwargs.weight_decay", 0.0)
-    update_config(config, "policy.lora_cfg.enabled", True)
-    update_config(config, "policy.lora_cfg.dim", LORA_R)
-    update_config(config, "policy.lora_cfg.alpha", LORA_ALPHA)
-    update_config(config, "policy.lora_cfg.dropout", 0.0)
-    update_config(
-        config,
-        "policy.lora_cfg.target_modules",
-        [
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-            "in_proj",
-            "out_proj",
-        ],
-    )
-    update_config(config, "policy.generation.backend", "vllm")
-    update_config(config, "policy.generation.temperature", TEMPERATURE)
-    update_config(config, "policy.generation.top_p", TOP_P)
-    update_config(config, "policy.generation.top_k", TOP_K)
-    update_config(config, "policy.generation.max_new_tokens", MAX_COMPLETION_LENGTH)
-    update_config(config, "policy.generation.vllm_cfg.gpu_memory_utilization", VLLM_GPU_MEMORY_UTILIZATION)
-    update_config(config, "policy.generation.vllm_cfg.tensor_parallel_size", NEMO_TENSOR_PARALLEL_SIZE)
-    update_config(config, "policy.generation.vllm_cfg.pipeline_parallel_size", NEMO_PIPELINE_PARALLEL_SIZE)
-    update_config(config, "policy.generation.colocated.enabled", True)
-    update_config(config, "data.train.data_path", str(train_jsonl))
-    update_config(config, "data.train.input_key", "input")
-    update_config(config, "data.train.output_key", "output")
-    update_config(config, "data.train.dataset_name", "ResponseDataset")
-    update_config(config, "data.train.env_name", NEMO_ENV_NAME)
-    if eval_jsonl is not None:
-        update_config(config, "data.validation.data_path", str(eval_jsonl))
-        update_config(config, "data.validation.input_key", "input")
-        update_config(config, "data.validation.output_key", "output")
-        update_config(config, "data.validation.dataset_name", "ResponseDataset")
-        update_config(config, "data.validation.env_name", NEMO_ENV_NAME)
-    else:
-        update_config(config, "data.validation", None)
-    update_config(config, "data.default.dataset_name", "ResponseDataset")
-    update_config(config, "data.default.input_key", "input")
-    update_config(config, "data.default.output_key", "output")
-    update_config(config, "data.default.processor", NEMO_PROCESSOR_NAME)
-    update_config(config, "data.default.env_name", NEMO_ENV_NAME)
-    update_config(config, "data.max_input_seq_length", MAX_PROMPT_LENGTH)
-    update_config(config, f"env.{NEMO_ENV_NAME}.num_workers", NEMO_ENV_NUM_WORKERS)
-    update_config(config, "logger.log_dir", str(OUTPUT_DIR))
-    update_config(config, "logger.wandb_enabled", "wandb" in REPORT_TO)
-    update_config(config, "logger.wandb.name", RUN_NAME)
-    update_config(config, "checkpointing.checkpoint_dir", str(ADAPTER_OUTPUT_DIR))
-    update_config(config, "checkpointing.save_period", SAVE_STEPS)
-    update_config(config, "checkpointing.save_at_end", True)
-    return config
+
+def validate_nemo_bridge() -> None:
+    bridge_module = NEMO_BRIDGE_DIR / "nemotron_nemo_bridge.py"
+    sitecustomize_module = NEMO_BRIDGE_DIR / "sitecustomize.py"
+    if not bridge_module.exists() or not sitecustomize_module.exists():
+        raise FileNotFoundError(
+            f"Expected NeMo bridge files under {NEMO_BRIDGE_DIR}"
+        )
 
 
 
@@ -1398,7 +1195,7 @@ def build_nemo_config(train_jsonl: Path, eval_jsonl: Path | None):
 # %% [markdown]
 # ## Training Runtime Bootstrap
 # - Materialize train and validation splits, then export them to NeMo-RL JSONL files.
-# - Run a local reward sanity check before invoking NeMo-RL.
+# - Check that the static NeMo config and bridge module are ready for subprocess launch.
 
 # %%
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -1408,6 +1205,9 @@ NEMO_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 train_dataset, eval_dataset = prepare_datasets()
 train_jsonl, eval_jsonl = prepare_nemo_jsonl_datasets(train_dataset, eval_dataset)
+nemo_config_path = resolve_nemo_config_path()
+validate_nemo_config_paths(nemo_config_path, train_jsonl, eval_jsonl)
+validate_nemo_bridge()
 
 print("NeMo-RL GRPO/GSPO training sample:")
 print(train_dataset[0])
@@ -1429,109 +1229,45 @@ print(f"Reward sanity check: {sample_reward}")
 
 
 # %% [markdown]
-# ## NeMo-RL Training Execution
-# - Register the custom processor and reward environment with NeMo-RL.
-# - Start single-node GRPO training with colocated vLLM generation when `NEMO_RUN_TRAIN=1`.
+# ## NeMo-RL Subprocess Launch
+# - Run `uv run python examples/run_grpo.py --config <nemotron-yaml>` from `NEMO_RL_DIR`.
+# - Put `src/nemo_bridge` on `PYTHONPATH` so `sitecustomize` registers the processor and environment.
 
 # %%
-def select_nemo_grpo_trainer(master_config):
-    data_plane_config = master_config.data_plane or {}
-    if data_plane_config.get("enabled", False):
-        from nemo_rl.algorithms.grpo_sync import grpo_train_sync
-
-        print("Running synchronous NeMo-RL GRPO training with TransferQueue")
-        return grpo_train_sync
-    from nemo_rl.algorithms.grpo import grpo_train
-
-    print("Running synchronous NeMo-RL GRPO training with legacy data path")
-    return grpo_train
-
-
-def run_nemo_grpo_training(train_jsonl: Path, eval_jsonl: Path | None):
-    from omegaconf import OmegaConf
-
-    from nemo_rl.algorithms.grpo import MasterConfig, setup
-    from nemo_rl.algorithms.utils import get_tokenizer
-    from nemo_rl.data.processors import register_processor
-    from nemo_rl.data.utils import setup_response_data
-    from nemo_rl.distributed.virtual_cluster import init_ray
-    from nemo_rl.environments.utils import register_env
-    from nemo_rl.models.generation import configure_generation_config
-
-    define_nemotron_reward_environment()
-    register_processor(NEMO_PROCESSOR_NAME, nemotron_grpo_data_processor)
-    register_env(NEMO_ENV_NAME, NEMO_ENV_FQN)
-
-    nemo_config = build_nemo_config(train_jsonl, eval_jsonl)
-    config_dict = OmegaConf.to_container(nemo_config, resolve=True)
-    master_config = MasterConfig(**config_dict)
-    init_ray()
-
-    tokenizer = get_tokenizer(master_config.policy["tokenizer"])
-    has_refit_draft_weights = bool(
-        master_config.policy.get("draft", {}).get("enabled", False)
+def nemo_subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        str(NEMO_BRIDGE_DIR)
+        if not existing_pythonpath
+        else f"{NEMO_BRIDGE_DIR}{os.pathsep}{existing_pythonpath}"
     )
-    master_config.policy["generation"] = configure_generation_config(
-        master_config.policy.get("generation", {}),
-        tokenizer,
-        has_refit_draft_weights=has_refit_draft_weights,
-    )
-    train_data, val_data, task_to_env, val_task_to_env = setup_response_data(
-        tokenizer,
-        master_config.data,
-        master_config.env,
-    )
-    data_plane_config = master_config.data_plane or {}
-    if data_plane_config.get("enabled", False):
-        from nemo_rl.models.policy.tq_policy import TQPolicy
-
-        def policy_factory(**kwargs):
-            return TQPolicy(**kwargs, dp_cfg=data_plane_config)
-    else:
-        policy_factory = None
-
-    (
-        policy,
-        policy_generation,
-        _nemo_gym,
-        cluster,
-        dataloader,
-        val_dataloader,
-        loss_fn,
-        logger,
-        checkpointer,
-        grpo_state,
-        master_config,
-    ) = setup(
-        master_config,
-        tokenizer,
-        train_data,
-        val_data,
-        policy_factory=policy_factory,
-    )
-    trainer = select_nemo_grpo_trainer(master_config)
-    trainer(
-        policy,
-        policy_generation,
-        dataloader,
-        val_dataloader,
-        tokenizer,
-        loss_fn,
-        task_to_env,
-        val_task_to_env,
-        logger,
-        checkpointer,
-        grpo_state,
-        master_config,
-    )
-    return master_config
+    env.setdefault("TRANSFORMERS_NO_TF", "1")
+    env.setdefault("TRANSFORMERS_NO_FLAX", "1")
+    env.setdefault("CUDA_VISIBLE_DEVICES", os.environ.get("CUDA_VISIBLE_DEVICES", "0"))
+    return env
 
 
-nemo_master_config = None
-if NEMO_RUN_TRAIN:
-    nemo_master_config = run_nemo_grpo_training(train_jsonl, eval_jsonl)
-else:
-    print("Skipping NeMo-RL training because NEMO_RUN_TRAIN=0")
+def run_nemo_grpo_subprocess(config_path: Path) -> subprocess.CompletedProcess[str] | None:
+    if not NEMO_RUN_TRAIN:
+        print("Skipping NeMo-RL training because NEMO_RUN_TRAIN=0")
+        return None
+    if not NEMO_RL_DIR.exists():
+        raise FileNotFoundError(f"NEMO_RL_DIR does not exist: {NEMO_RL_DIR}")
+    if not (NEMO_RL_DIR / "examples" / "run_grpo.py").exists():
+        raise FileNotFoundError(f"examples/run_grpo.py not found under {NEMO_RL_DIR}")
+    command = ["uv", "run", "python", "examples/run_grpo.py", "--config", str(config_path)]
+    print(f"Running NeMo-RL subprocess in {NEMO_RL_DIR}: {' '.join(command)}")
+    return subprocess.run(
+        command,
+        cwd=str(NEMO_RL_DIR),
+        env=nemo_subprocess_env(),
+        check=True,
+        text=True,
+    )
+
+
+nemo_subprocess_result = run_nemo_grpo_subprocess(nemo_config_path)
 
 
 
