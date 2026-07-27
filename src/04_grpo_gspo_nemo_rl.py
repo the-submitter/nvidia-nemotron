@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
+import site
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Optional
 
@@ -57,21 +58,285 @@ HF_KEY = WANDB_KEY = KAGGLE_KEY = KAGGLE_USERNAME = None
 
 # %% [markdown]
 # ## Kaggle Dependencies
-# - Document optional Kaggle package-install commands.
-# - Use cached wheels or commented commands to keep notebook startup controllable.
+# - Discover the `unsloth-vllm-wheels-temp` Kaggle input without relying on one
+#   mount spelling.
+# - Build an isolated Python 3.12 environment that reuses Kaggle's CUDA 12.8
+#   PyTorch and installs every compatible cached wheel with network access disabled.
+# - Use the bundled NeMo-RL source directly. `uv run` is intentionally not used:
+#   NeMo-RL's worker-specific `uv` environments can otherwise try to resolve or
+#   build packages that are unavailable on an internet-disabled Kaggle session.
+# - The bundled RDMA `.deb` files are only a fallback when `libibverbs` is absent.
+#   Only runtime packages are installed; the development package is unnecessary
+#   because every Python dependency is installed from a prebuilt wheel.
+#   cuDNN archives are not required by this DTensor + vLLM recipe (they are needed
+#   by the Megatron backend), so they are deliberately left untouched.
 
 # %%
-wheels_dir = "/kaggle/input/datasets/rohitraje0493/nemo-rl-vllm-wheels/packages"
-# !pip install uv --no-index --find-links={wheels_dir}
-# !uv pip install \
-#     "vllm>=0.12.0,<0.19.0" \
-#     "transformers>=4.56.2,<5.0.0" \
-#     "tokenizers>=0.22.0,<=0.23.0" \
-#     "math-verify[antlr4_11_0]" \
-#     rapidfuzz \
-#     "antlr4-python3-runtime==4.11.0" \
-#     "protobuf<6.0.0" \
-#     --no-index --find-links={wheels_dir}
+def _is_truthy(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() not in {"", "0", "false", "no", "none", "null"}
+
+
+def find_kaggle_bundle() -> Path | None:
+    configured = os.environ.get("KAGGLE_BUNDLE_DIR")
+    candidates = [
+        Path(configured) if configured else None,
+        Path("/kaggle/input/unsloth-vllm-wheels-temp"),
+        Path(
+            "/kaggle/input/datasets/rohitraje0493/"
+            "unsloth-vllm-wheels-temp"
+        ),
+    ]
+    kaggle_input = Path("/kaggle/input")
+    if kaggle_input.exists():
+        candidates.extend(kaggle_input.glob("*/"))
+        candidates.extend(kaggle_input.glob("datasets/*/*/"))
+
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        candidate = candidate.resolve()
+        if (
+            (candidate / "packages").is_dir()
+            and (candidate / "nemo-rl" / "examples" / "run_grpo.py").is_file()
+            and (candidate / "nvidia-nemotron" / "src").is_dir()
+        ):
+            return candidate
+    return None
+
+
+def find_code_repo(bundle_dir: Path | None) -> Path:
+    configured = os.environ.get("NEMOTRON_CODE_DIR")
+    if configured:
+        return Path(configured).resolve()
+    if bundle_dir is not None:
+        return (bundle_dir / "nvidia-nemotron").resolve()
+    file_value = globals().get("__file__")
+    if file_value:
+        file_path = Path(str(file_value)).resolve()
+        if file_path.is_file() and file_path.parent.name == "src":
+            return file_path.parent.parent
+    if (Path.cwd() / "src" / "nemo_bridge").is_dir():
+        return Path.cwd().resolve()
+    raise FileNotFoundError(
+        "Could not find the nvidia-nemotron source tree. Set NEMOTRON_CODE_DIR."
+    )
+
+
+KAGGLE_RUNTIME = (
+    "KAGGLE_KERNEL_RUN_TYPE" in os.environ or Path("/kaggle/input").is_dir()
+)
+KAGGLE_BUNDLE_DIR = find_kaggle_bundle()
+if KAGGLE_RUNTIME and KAGGLE_BUNDLE_DIR is None:
+    raise FileNotFoundError(
+        "The Kaggle dependency input was not found. Attach "
+        "`unsloth-vllm-wheels-temp` or set KAGGLE_BUNDLE_DIR."
+    )
+
+CODE_REPO_DIR = find_code_repo(KAGGLE_BUNDLE_DIR)
+CODE_SRC_DIR = CODE_REPO_DIR / "src"
+if str(CODE_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(CODE_SRC_DIR))
+
+DEFAULT_NEMO_RL_DIR = (
+    KAGGLE_BUNDLE_DIR / "nemo-rl"
+    if KAGGLE_BUNDLE_DIR is not None
+    else Path(
+        os.environ.get(
+            "LOCAL_NEMO_RL_DIR",
+            "/media/rohit-raje/Elements/Rohit/rohit_lenovo/explore/nemo-rl",
+        )
+    )
+)
+KAGGLE_NEMO_VENV = Path(
+    os.environ.get("KAGGLE_NEMO_VENV", "/kaggle/working/nemo_rl_venv")
+)
+KAGGLE_SYSTEM_RUNTIME_DISTRIBUTIONS = {
+    "torch",
+    "torchaudio",
+    "torchvision",
+    "triton",
+}
+KAGGLE_SYSTEM_CUDA_DISTRIBUTION_PREFIXES = (
+    "nvidia-cublas-",
+    "nvidia-cuda-",
+    "nvidia-cudnn-",
+    "nvidia-cufft-",
+    "nvidia-cufile-",
+    "nvidia-curand-",
+    "nvidia-cusolver-",
+    "nvidia-cusparse-",
+    "nvidia-cusparselt-",
+    "nvidia-nccl-",
+    "nvidia-nvjitlink-",
+    "nvidia-nvshmem-",
+)
+KAGGLE_WHEEL_VERSION_CONSTRAINTS = {
+    "flashinfer-cubin": "==0.6.8.post1",
+    "flashinfer-jit-cache": "==0.6.8.post1",
+    "flashinfer-python": "==0.6.8.post1",
+    "transformers": ">=5.5.0,<5.6.0",
+    "vllm": ">=0.20.0,<0.21.0",
+}
+
+
+def _compatible_wheels(wheel_dir: Path) -> list[Path]:
+    """Choose the newest compatible wheel for each normalized distribution."""
+    from packaging.specifiers import SpecifierSet
+    from packaging.tags import sys_tags
+    from packaging.utils import canonicalize_name, parse_wheel_filename
+
+    supported_tags = {tag: index for index, tag in enumerate(sys_tags())}
+    selected: dict[str, tuple[Any, int, Path]] = {}
+    for wheel_path in sorted(wheel_dir.glob("*.whl")):
+        try:
+            name, version, _build, wheel_tags = parse_wheel_filename(
+                wheel_path.name
+            )
+        except Exception:
+            continue
+        tag_ranks = [
+            supported_tags[tag] for tag in wheel_tags if tag in supported_tags
+        ]
+        if not tag_ranks:
+            continue
+        key = canonicalize_name(name)
+        version_constraint = KAGGLE_WHEEL_VERSION_CONSTRAINTS.get(key)
+        if (
+            version_constraint is not None
+            and version not in SpecifierSet(version_constraint)
+        ):
+            continue
+        candidate = (version, -min(tag_ranks), wheel_path)
+        if key not in selected or candidate[:2] > selected[key][:2]:
+            selected[key] = candidate
+    return [selected[name][2] for name in sorted(selected)]
+
+
+def _matching_system_distribution(wheel_path: Path) -> bool:
+    """Reuse exact matches and preserve Kaggle's CUDA 12.8 Torch runtime."""
+    from importlib.metadata import PackageNotFoundError, version as installed_version
+    from packaging.utils import canonicalize_name, parse_wheel_filename
+    from packaging.version import Version
+
+    name, candidate_version, _build, _tags = parse_wheel_filename(
+        wheel_path.name
+    )
+    try:
+        system_version = Version(installed_version(name))
+    except (PackageNotFoundError, ValueError):
+        return False
+    normalized_name = canonicalize_name(name)
+    if (
+        normalized_name in KAGGLE_SYSTEM_RUNTIME_DISTRIBUTIONS
+        or normalized_name.startswith(KAGGLE_SYSTEM_CUDA_DISTRIBUTION_PREFIXES)
+    ):
+        return True
+    return system_version == candidate_version
+
+
+def ensure_rdma_runtime(bundle_dir: Path) -> None:
+    import ctypes.util
+
+    if ctypes.util.find_library("ibverbs"):
+        print("RDMA runtime already provides libibverbs; local .deb files skipped")
+        return
+    deb_names = [
+        "rdma-core_39.0-1_amd64.deb",
+        "libibverbs1_39.0-1_amd64.deb",
+        "ibverbs-providers_39.0-1_amd64.deb",
+    ]
+    deb_paths = [bundle_dir / name for name in deb_names]
+    missing = [str(path) for path in deb_paths if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(f"Missing offline RDMA packages: {missing}")
+    if hasattr(os, "geteuid") and os.geteuid() != 0:
+        raise PermissionError(
+            "libibverbs is missing and installing the bundled .deb files "
+            "requires a root Kaggle session"
+        )
+    subprocess.run(["dpkg", "-i", *map(str, deb_paths)], check=True)
+
+
+def create_offline_nemo_environment(
+    bundle_dir: Path,
+    venv_dir: Path,
+) -> Path:
+    wheel_dir = bundle_dir / "packages"
+    if not any(wheel_dir.glob("*.whl")):
+        raise FileNotFoundError(f"No dependency wheels found under {wheel_dir}")
+
+    python_path = venv_dir / "bin" / "python"
+    if not python_path.is_file():
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "venv",
+                "--system-site-packages",
+                str(venv_dir),
+            ],
+            check=True,
+        )
+
+    compatible_wheels = _compatible_wheels(wheel_dir)
+    manifest_path = venv_dir / ".nemotron-wheel-manifest.json"
+    manifest = [path.name for path in compatible_wheels]
+    if manifest_path.is_file():
+        try:
+            if json.loads(manifest_path.read_text()) == manifest:
+                print(f"Reusing populated offline wheel environment at {venv_dir}")
+                return python_path
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    wheels = [
+        path
+        for path in compatible_wheels
+        if not _matching_system_distribution(path)
+    ]
+    if wheels:
+        command = [
+            str(python_path),
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            "--no-deps",
+            "--disable-pip-version-check",
+            *map(str, wheels),
+        ]
+        print(f"Installing {len(wheels)} compatible offline wheels into {venv_dir}")
+        subprocess.run(command, check=True)
+    else:
+        print(f"Offline wheel environment is already populated at {venv_dir}")
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    return python_path
+
+
+NEMO_PYTHON = Path(sys.executable)
+if KAGGLE_RUNTIME and _is_truthy(
+    os.environ.get("KAGGLE_BOOTSTRAP_NEMO_DEPS"),
+    default=True,
+):
+    assert KAGGLE_BUNDLE_DIR is not None
+    ensure_rdma_runtime(KAGGLE_BUNDLE_DIR)
+    NEMO_PYTHON = create_offline_nemo_environment(
+        KAGGLE_BUNDLE_DIR,
+        KAGGLE_NEMO_VENV,
+    )
+    venv_site_packages = (
+        KAGGLE_NEMO_VENV
+        / "lib"
+        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+    )
+    if venv_site_packages.is_dir():
+        site.addsitedir(str(venv_site_packages))
+
+print(f"NeMo-RL source: {DEFAULT_NEMO_RL_DIR}")
+print(f"NeMo-RL Python: {NEMO_PYTHON}")
 
 
 
@@ -89,7 +354,7 @@ MODEL_PATH = os.environ.get(
 )
 ADAPTER_INPUT_PATH = os.environ.get(
     "ADAPTER_INPUT_PATH",
-    "/kaggle/input/models/rohitraje0493/nemotron-3-nano/transformers/lora-dpo/5",
+    None,
 )
 BASE_MODEL_ID = os.environ.get(
     "BASE_MODEL_ID",
@@ -277,7 +542,7 @@ if REPORT_TO == "wandb":
 #   later.
 
 # %%
-from nemo_bridge.nemotron_reward_utils import (
+from nemo_bridge.nemotron_reward_utils import (  # noqa: E402
     clean_text,
     combine_reasoning_response,
     unified_reward,
@@ -574,7 +839,6 @@ def prepare_split(
                 {
                     "role": Value("string"),
                     "content": Value("string"),
-                    "reasoning_content": Value("string"),
                 }
             ),
             "response": Value("string"),
@@ -685,8 +949,10 @@ def prepare_datasets():
 
 # %% [markdown]
 # ## Adapter Input Preparation
-# - Resolve an optional PEFT adapter path from a Kaggle input or local folder.
-# - Normalize adapter metadata when a Kaggle-local base model path replaces the original model id.
+# - NeMo-RL's DTensor GRPO path creates and checkpoints its own LoRA modules.
+# - It does not accept an Unsloth/Hugging Face PEFT adapter directory as
+#   `policy.model_name`. Start from `MODEL_PATH`, or point `ADAPTER_INPUT_PATH`
+#   at a previously merged, complete Hugging Face checkpoint.
 
 # %%
 def prepare_adapter_input_path() -> Optional[str]:
@@ -694,32 +960,23 @@ def prepare_adapter_input_path() -> Optional[str]:
         return None
 
     source_path = Path(ADAPTER_INPUT_PATH)
-    if not (source_path / "adapter_config.json").exists():
+    if not source_path.is_dir():
         raise FileNotFoundError(
-            f"adapter_config.json does not exist under {source_path}"
+            f"ADAPTER_INPUT_PATH does not exist: {source_path}"
         )
-
-    adapter_path = source_path
-    if str(source_path).startswith("/kaggle/input"):
-        adapter_path = WORKING_DIR / "adapter_input"
-        if adapter_path.exists():
-            shutil.rmtree(adapter_path)
-        shutil.copytree(source_path, adapter_path)
-
-    if BASE_MODEL_ID and MODEL_PATH:
-        readme_path = adapter_path / "README.md"
-        if readme_path.exists():
-            readme_path.write_text(
-                readme_path.read_text().replace(BASE_MODEL_ID, MODEL_PATH)
-            )
-
-        config_path = adapter_path / "adapter_config.json"
-        if config_path.exists():
-            config_path.write_text(
-                config_path.read_text().replace(BASE_MODEL_ID, MODEL_PATH)
-            )
-
-    return str(adapter_path)
+    full_weight_files = (
+        list(source_path.glob("model*.safetensors"))
+        + list(source_path.glob("pytorch_model*.bin"))
+    )
+    if not (source_path / "config.json").is_file() or not full_weight_files:
+        raise RuntimeError(
+            "ADAPTER_INPUT_PATH is an adapter-only checkpoint. NeMo-RL "
+            "DTensor GRPO cannot continue directly from an Unsloth/PEFT "
+            "adapter. Merge it with the base model in a separate internet-"
+            "enabled preparation job, attach that full checkpoint to Kaggle, "
+            "or unset ADAPTER_INPUT_PATH to train a fresh NeMo-RL LoRA."
+        )
+    return str(source_path.resolve())
 
 
 
@@ -733,12 +990,32 @@ def prepare_adapter_input_path() -> Optional[str]:
 NEMO_DATA_DIR = Path(os.environ.get("NEMO_DATA_DIR", WORKING_DIR / "nemo_rl_data"))
 NEMO_TRAIN_JSONL = NEMO_DATA_DIR / "train.jsonl"
 NEMO_EVAL_JSONL = NEMO_DATA_DIR / "validation.jsonl"
-NEMO_RL_DIR = Path(os.environ.get("NEMO_RL_DIR", str(WORKING_DIR / "nemo-rl")))
+NEMO_RL_DIR = Path(
+    os.environ.get("NEMO_RL_DIR", str(DEFAULT_NEMO_RL_DIR))
+).resolve()
 NEMO_CONFIG_PATH = Path(
-    os.environ.get("NEMO_CONFIG_PATH", "configs/grpo_gspo_nemotron.yaml")
+    os.environ.get(
+        "NEMO_CONFIG_PATH",
+        str(CODE_REPO_DIR / "configs" / "grpo_gspo_nemotron.yaml"),
+    )
 )
-NEMO_BRIDGE_DIR = Path(globals().get("__file__", Path.cwd() / "src" / "04_grpo_gspo_nemo_rl.py")).resolve().parent / "nemo_bridge"
+NEMO_RUNTIME_CONFIG_PATH = Path(
+    os.environ.get(
+        "NEMO_RUNTIME_CONFIG_PATH",
+        str(WORKING_DIR / "grpo_gspo_nemotron.runtime.yaml"),
+    )
+)
+NEMO_BRIDGE_DIR = (CODE_SRC_DIR / "nemo_bridge").resolve()
 NEMO_RUN_TRAIN = bool_env("NEMO_RUN_TRAIN", True)
+
+
+def nemo_source_workspaces() -> list[Path]:
+    """Return editable NeMo workspace dependencies normally installed by uv."""
+    candidates = [
+        NEMO_RL_DIR / "3rdparty" / "Automodel-workspace" / "Automodel",
+        NEMO_RL_DIR / "3rdparty" / "Gym-workspace" / "Gym",
+    ]
+    return [path.resolve() for path in candidates if path.is_dir()]
 
 
 
@@ -749,8 +1026,22 @@ NEMO_RUN_TRAIN = bool_env("NEMO_RUN_TRAIN", True)
 # - Preserve prompt, reference answer, reasoning, and response metadata for the reward environment.
 
 # %%
+def nemo_prompt_text(prompt: Any) -> str:
+    if isinstance(prompt, str):
+        return prompt
+    if isinstance(prompt, list):
+        user_contents = [
+            str(message.get("content") or "")
+            for message in prompt
+            if isinstance(message, dict) and message.get("role") == "user"
+        ]
+        if user_contents:
+            return user_contents[-1]
+    raise TypeError(f"Unsupported prompt value for NeMo-RL export: {type(prompt)}")
+
+
 def nemo_jsonl_record(example: dict[str, Any]) -> dict[str, Any]:
-    prompt = str(example.get("prompt") or "")
+    prompt = nemo_prompt_text(example.get("prompt"))
     reference_completion = combine_reasoning_response(
         example.get("reasoning"),
         example.get("response"),
@@ -792,8 +1083,10 @@ def prepare_nemo_jsonl_datasets(train_dataset, eval_dataset):
 
 # %% [markdown]
 # ## NeMo-RL Config and Bridge
-# - Resolve the static NeMo-RL YAML config used by `examples/run_grpo.py --config`.
-# - Validate that the exported JSONL paths match the static config before launch.
+# - Materialize a writable runtime YAML from the checked-in recipe.
+# - Inject Kaggle-local model, data, output, and logging paths so the launch never
+#   depends on stale hard-coded paths.
+# - Enforce the mutually exclusive GSPO loss switches.
 
 # %%
 def resolve_nemo_config_path() -> Path:
@@ -803,6 +1096,165 @@ def resolve_nemo_config_path() -> Path:
     if candidate.exists():
         return candidate
     raise FileNotFoundError(f"NeMo config not found: {NEMO_CONFIG_PATH}")
+
+
+def materialize_nemo_runtime_config(
+    template_path: Path,
+    train_jsonl: Path,
+    eval_jsonl: Path | None,
+) -> Path:
+    from omegaconf import OmegaConf
+
+    config = OmegaConf.load(template_path)
+    adapter_or_model_path = prepare_adapter_input_path()
+    model_path = adapter_or_model_path or MODEL_PATH
+    model_dir = Path(model_path)
+    if not model_dir.is_dir() or not (model_dir / "config.json").is_file():
+        raise FileNotFoundError(
+            "MODEL_PATH must be a complete, locally mounted Hugging Face "
+            f"checkpoint on an offline Kaggle run: {model_dir}"
+        )
+
+    config.policy.model_name = str(model_dir.resolve())
+    config.policy.tokenizer.name = str(model_dir.resolve())
+    config.checkpointing.checkpoint_dir = str(ADAPTER_OUTPUT_DIR.resolve())
+    config.checkpointing.metric_name = None
+    config.logger.log_dir = str((OUTPUT_DIR / "nemo_logs").resolve())
+    config.logger.wandb_enabled = bool_env("NEMO_WANDB_ENABLED", False)
+    config.logger.tensorboard_enabled = bool_env(
+        "NEMO_TENSORBOARD_ENABLED",
+        False,
+    )
+    config.grpo.seed = SEED
+    config.grpo.max_num_steps = int(
+        os.environ.get("NEMO_MAX_STEPS", config.grpo.max_num_steps)
+    )
+    config.grpo.num_prompts_per_step = int(
+        os.environ.get(
+            "NEMO_NUM_PROMPTS_PER_STEP",
+            config.grpo.num_prompts_per_step,
+        )
+    )
+    config.grpo.num_generations_per_prompt = int(
+        os.environ.get(
+            "NEMO_NUM_GENERATIONS_PER_PROMPT",
+            config.grpo.num_generations_per_prompt,
+        )
+    )
+    config.checkpointing.save_period = int(
+        os.environ.get(
+            "NEMO_SAVE_PERIOD",
+            config.checkpointing.save_period,
+        )
+    )
+    config.policy.max_total_sequence_length = int(
+        os.environ.get(
+            "NEMO_MAX_TOTAL_SEQUENCE_LENGTH",
+            config.policy.max_total_sequence_length,
+        )
+    )
+    config.data.max_input_seq_length = int(
+        os.environ.get(
+            "NEMO_MAX_INPUT_SEQUENCE_LENGTH",
+            config.data.max_input_seq_length,
+        )
+    )
+    config.policy.generation.max_new_tokens = int(
+        os.environ.get(
+            "NEMO_MAX_NEW_TOKENS",
+            config.policy.generation.max_new_tokens,
+        )
+    )
+    config.policy.generation.vllm_cfg.gpu_memory_utilization = float(
+        os.environ.get(
+            "NEMO_VLLM_GPU_MEMORY_UTILIZATION",
+            config.policy.generation.vllm_cfg.gpu_memory_utilization,
+        )
+    )
+    config.policy.dtensor_cfg.lora_cfg.dim = int(
+        os.environ.get(
+            "NEMO_LORA_DIM",
+            config.policy.dtensor_cfg.lora_cfg.dim,
+        )
+    )
+    config.policy.dtensor_cfg.lora_cfg.alpha = int(
+        os.environ.get(
+            "NEMO_LORA_ALPHA",
+            config.policy.dtensor_cfg.lora_cfg.alpha,
+        )
+    )
+
+    config.data.train.data_path = str(train_jsonl.resolve())
+    if eval_jsonl is None:
+        config.data.validation = None
+        config.grpo.val_at_start = False
+        config.grpo.val_at_end = False
+    else:
+        config.data.validation = {
+            "data_path": str(eval_jsonl.resolve()),
+            "dataset_name": "ResponseDataset",
+            "input_key": "input",
+            "output_key": "output",
+            "processor": "nemotron_grpo_data_processor",
+            "env_name": "nemotron_unified_reward",
+        }
+
+    use_gspo = TRAIN_STAGE.strip().lower() == "gspo"
+    config.loss_fn.sequence_level_importance_ratios = bool_env(
+        "NEMO_SEQUENCE_LEVEL_IMPORTANCE_RATIOS",
+        use_gspo,
+    )
+    config.loss_fn.token_level_loss = bool_env(
+        "NEMO_TOKEN_LEVEL_LOSS",
+        not config.loss_fn.sequence_level_importance_ratios,
+    )
+    if (
+        config.loss_fn.sequence_level_importance_ratios
+        and config.loss_fn.token_level_loss
+    ):
+        raise ValueError(
+            "GSPO sequence-level importance ratios are mutually exclusive "
+            "with token-level loss. Set NEMO_TOKEN_LEVEL_LOSS=0."
+        )
+
+    expected_global_batch = (
+        int(config.grpo.num_prompts_per_step)
+        * int(config.grpo.num_generations_per_prompt)
+    )
+    config.policy.train_global_batch_size = int(
+        os.environ.get(
+            "NEMO_TRAIN_GLOBAL_BATCH_SIZE",
+            expected_global_batch,
+        )
+    )
+    if int(config.policy.train_global_batch_size) != expected_global_batch:
+        raise ValueError(
+            "policy.train_global_batch_size must equal "
+            "grpo.num_prompts_per_step * grpo.num_generations_per_prompt "
+            f"for this on-policy recipe ({expected_global_batch})"
+        )
+    # if (
+    #     int(config.data.max_input_seq_length)
+    #     + int(config.policy.generation.max_new_tokens)
+    #     > int(config.policy.max_total_sequence_length)
+    # ):
+    #     raise ValueError(
+    #         "NEMO_MAX_INPUT_SEQUENCE_LENGTH + NEMO_MAX_NEW_TOKENS "
+    #         "must not exceed NEMO_MAX_TOTAL_SEQUENCE_LENGTH"
+    #     )
+    if not (
+        0.0
+        < float(config.policy.generation.vllm_cfg.gpu_memory_utilization)
+        < 1.0
+    ):
+        raise ValueError(
+            "NEMO_VLLM_GPU_MEMORY_UTILIZATION must be between 0 and 1"
+        )
+
+    NEMO_RUNTIME_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    OmegaConf.save(config, NEMO_RUNTIME_CONFIG_PATH)
+    print(f"Materialized NeMo-RL runtime config at {NEMO_RUNTIME_CONFIG_PATH}")
+    return NEMO_RUNTIME_CONFIG_PATH.resolve()
 
 
 def validate_nemo_config_paths(config_path: Path, train_jsonl: Path, eval_jsonl: Path | None) -> None:
@@ -858,7 +1310,12 @@ NEMO_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 train_dataset, eval_dataset = prepare_datasets()
 train_jsonl, eval_jsonl = prepare_nemo_jsonl_datasets(train_dataset, eval_dataset)
-nemo_config_path = resolve_nemo_config_path()
+nemo_config_template_path = resolve_nemo_config_path()
+nemo_config_path = materialize_nemo_runtime_config(
+    nemo_config_template_path,
+    train_jsonl,
+    eval_jsonl,
+)
 validate_nemo_config_paths(nemo_config_path, train_jsonl, eval_jsonl)
 validate_nemo_bridge()
 
@@ -883,22 +1340,96 @@ print(f"Reward sanity check: {sample_reward}")
 
 # %% [markdown]
 # ## NeMo-RL Subprocess Launch
-# - Run `uv run python examples/run_grpo.py --config <nemotron-yaml>` from `NEMO_RL_DIR`.
+# - Run the checked-in driver with the isolated offline Python environment.
 # - Put `src/nemo_bridge` on `PYTHONPATH` so `sitecustomize` registers the processor and environment.
+# - Force all Ray actors to reuse that environment; this avoids NeMo-RL trying
+#   to create worker-specific `uv` environments from the network.
 
 # %%
 def nemo_subprocess_env() -> dict[str, str]:
     env = os.environ.copy()
     existing_pythonpath = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        str(NEMO_BRIDGE_DIR)
-        if not existing_pythonpath
-        else f"{NEMO_BRIDGE_DIR}{os.pathsep}{existing_pythonpath}"
+    python_paths = [
+        str(NEMO_BRIDGE_DIR),
+        str(NEMO_RL_DIR),
+        *(str(path) for path in nemo_source_workspaces()),
+        str(CODE_SRC_DIR),
+    ]
+    if existing_pythonpath:
+        python_paths.append(existing_pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(python_paths)
+    env["NEMO_RL_PY_EXECUTABLES_SYSTEM"] = "1"
+    env.setdefault(
+        "NEMO_KAGGLE_BF16_LORA",
+        "1" if KAGGLE_RUNTIME else "0",
     )
+    env["HF_HUB_OFFLINE"] = "1"
+    env["TRANSFORMERS_OFFLINE"] = "1"
+    env["HF_DATASETS_OFFLINE"] = "1"
+    env["UV_OFFLINE"] = "1"
+    env["PIP_NO_INDEX"] = "1"
+    env["TOKENIZERS_PARALLELISM"] = "false"
+    env["HF_HOME"] = str(HF_CACHE_DIR)
+    env["HF_DATASETS_CACHE"] = str(HF_CACHE_DIR / "datasets")
     env.setdefault("TRANSFORMERS_NO_TF", "1")
     env.setdefault("TRANSFORMERS_NO_FLAX", "1")
     env.setdefault("CUDA_VISIBLE_DEVICES", os.environ.get("CUDA_VISIBLE_DEVICES", "0"))
     return env
+
+
+def validate_nemo_python() -> None:
+    check_code = """
+import sys
+import torch
+import ray
+import transformers
+from packaging.specifiers import SpecifierSet
+from packaging.version import Version
+if sys.version_info[:2] != (3, 12):
+    raise RuntimeError(f"Expected Python 3.12 for the Kaggle wheel set, got {sys.version}")
+if Version(transformers.__version__) not in SpecifierSet(">=5.5.0,<5.6.0"):
+    raise RuntimeError(
+        "This NeMo-RL/AutoModel checkout requires Transformers >=5.5,<5.6, "
+        f"got {transformers.__version__}"
+    )
+try:
+    import vllm
+except Exception as exc:
+    raise RuntimeError(
+        "The bundled vLLM wheel could not load with Kaggle's Torch 2.10/CUDA 12.8 "
+        "runtime. Upstream vLLM 0.20 release wheels default to CUDA 13, so the "
+        "offline wheelhouse must include the compatible wheel/runtime set."
+    ) from exc
+import nemo_automodel
+import nemo_rl
+import nemotron_nemo_bridge
+print(
+    "Validated NeMo runtime:",
+    f"torch={torch.__version__}",
+    f"cuda={torch.version.cuda}",
+    f"transformers={transformers.__version__}",
+    f"vllm={vllm.__version__}",
+)
+if torch.__version__.split("+", 1)[0] != "2.10.0":
+    raise RuntimeError(f"Expected torch 2.10.0 for the Kaggle wheel set, got {torch.__version__}")
+if torch.version.cuda != "12.8":
+    raise RuntimeError(f"Expected CUDA 12.8 PyTorch, got {torch.version.cuda}")
+if Version(vllm.__version__).release[:2] != (0, 20):
+    raise RuntimeError(
+        f"This NeMo-RL checkout requires the bundled vLLM 0.20.x API, got {vllm.__version__}"
+    )
+if not torch.cuda.is_available():
+    raise RuntimeError("CUDA is not available in the NeMo-RL subprocess")
+torch.empty(1, device="cuda")
+print("CUDA device:", torch.cuda.get_device_name(0))
+"""
+    subprocess.run(
+        [str(NEMO_PYTHON), "-c", check_code],
+        cwd=str(NEMO_RL_DIR),
+        env=nemo_subprocess_env(),
+        check=True,
+        text=True,
+    )
 
 
 def run_nemo_grpo_subprocess(config_path: Path) -> subprocess.CompletedProcess[str] | None:
@@ -909,7 +1440,13 @@ def run_nemo_grpo_subprocess(config_path: Path) -> subprocess.CompletedProcess[s
         raise FileNotFoundError(f"NEMO_RL_DIR does not exist: {NEMO_RL_DIR}")
     if not (NEMO_RL_DIR / "examples" / "run_grpo.py").exists():
         raise FileNotFoundError(f"examples/run_grpo.py not found under {NEMO_RL_DIR}")
-    command = ["uv", "run", "python", "examples/run_grpo.py", "--config", str(config_path)]
+    validate_nemo_python()
+    command = [
+        str(NEMO_PYTHON),
+        "examples/run_grpo.py",
+        "--config",
+        str(config_path),
+    ]
     print(f"Running NeMo-RL subprocess in {NEMO_RL_DIR}: {' '.join(command)}")
     return subprocess.run(
         command,

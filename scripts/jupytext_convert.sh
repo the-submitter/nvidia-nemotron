@@ -5,15 +5,19 @@ PROJECT_ROOT="."
 DRY_RUN=false
 MODE="py:percent"
 PREFIX="."
+DEST=""
+MAINTAIN_STRUCTURE=false
 EXCLUDE_PATHS=()
 
 usage() {
-    echo "Usage: $0 [PROJECT_ROOT] [--to-ipynb | --to-py] [--prefix PATH] [--exclude PATH] [--dry-run]"
-    echo "  --to-py          Convert .ipynb to .py (percent format) [Default]"
-    echo "  --to-ipynb       Convert .py to .ipynb"
-    echo "  -p, --prefix     Output path prefix (default: .). Use \".\" for same dir."
-    echo "  -e, --exclude    Path/pattern to exclude from scanning (can be specified multiple times)"
-    echo "  --dry-run        Show actions without executing"
+    echo "Usage: $0 [PROJECT_ROOT] [--to-ipynb | --to-py] [--destination PATH] [--prefix PATH] [--exclude PATH] [--maintain-structure] [--dry-run]"
+    echo "  --to-py              Convert .ipynb to .py (percent format) [Default]"
+    echo "  --to-ipynb           Convert .py to .ipynb"
+    echo "  -d, --destination    Destination folder for converted output files"
+    echo "  -p, --prefix         Optional subpath under destination (default: .). Use \".\" for same dir."
+    echo "  -e, --exclude        Path/pattern to exclude from scanning (can be specified multiple times)"
+    echo "  --maintain-structure Maintain source directory structure under destination"
+    echo "  --dry-run            Show actions without executing"
     exit 1
 }
 
@@ -22,6 +26,15 @@ while [[ "$#" -gt 0 ]]; do
     case $1 in
         --to-py) MODE="py:percent"; shift ;;
         --to-ipynb) MODE="notebook"; shift ;;
+        -d|--destination)
+            if [[ -n "$2" && "$2" != -* ]]; then
+                DEST="$2"
+                shift 2
+            else
+                echo "Error: --destination requires a value."
+                exit 1
+            fi
+            ;;
         -p|--prefix)
             if [[ -n "$2" && "$2" != -* ]]; then
                 PREFIX="$2"
@@ -40,6 +53,9 @@ while [[ "$#" -gt 0 ]]; do
                 exit 1
             fi
             ;;
+        --maintain-structure)
+            MAINTAIN_STRUCTURE=true
+            shift ;;
         --dry-run) DRY_RUN=true; shift ;;
         -h|--help) usage ;;
         *) PROJECT_ROOT="$1"; shift ;;
@@ -48,6 +64,11 @@ done
 
 # Ensure empty prefix string also becomes "."
 PREFIX="${PREFIX:-.}"
+
+# Remove trailing "/" from PROJECT_ROOT, PREFIX and DEST if any
+PROJECT_ROOT="${PROJECT_ROOT%/}"
+PREFIX="${PREFIX%/}"
+DEST="${DEST%/}"
 
 if [ "$MODE" == "py:percent" ]; then
     SEARCH_EXT="*.ipynb"
@@ -73,9 +94,30 @@ done
 find "$PROJECT_ROOT" "${FIND_EXCLUDES[@]}" -name "$SEARCH_EXT" -type f -print | while read -r input_file; do
     dir=$(dirname "$input_file")
     base=$(basename "$input_file" | sed 's/\.[^.]*$//')
-    
-    # Construct the output path
-    output_path="$dir/$PREFIX/${base}${OUT_EXT}"
+
+    if [ -n "$DEST" ] && [ "$DEST" != "." ]; then
+        if [ "$MAINTAIN_STRUCTURE" = true ]; then
+            rel_dir="${dir#"$PROJECT_ROOT"}"
+            rel_dir="${rel_dir#/}"
+
+            output_dir="$DEST"
+            if [ "$PREFIX" != "." ]; then
+                output_dir="$output_dir/$PREFIX"
+            fi
+            if [ -n "$rel_dir" ]; then
+                output_dir="$output_dir/$rel_dir"
+            fi
+        else
+            output_dir="$DEST"
+            if [ "$PREFIX" != "." ]; then
+                output_dir="$output_dir/$PREFIX"
+            fi
+        fi
+    else
+        output_dir="$dir/$PREFIX"
+    fi
+
+    output_path="$output_dir/${base}${OUT_EXT}"
     cmd="jupytext --to $MODE \"$input_file\" -o \"$output_path\""
     
     if [ "$DRY_RUN" = true ]; then
