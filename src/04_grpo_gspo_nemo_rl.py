@@ -1006,6 +1006,7 @@ NEMO_RUNTIME_CONFIG_PATH = Path(
     )
 )
 NEMO_BRIDGE_DIR = (CODE_SRC_DIR / "nemo_bridge").resolve()
+NEMO_RUNTIME_VALIDATOR = NEMO_BRIDGE_DIR / "validate_nemo_runtime.py"
 NEMO_RUN_TRAIN = bool_env("NEMO_RUN_TRAIN", True)
 
 
@@ -1289,7 +1290,14 @@ def validate_nemo_config_paths(config_path: Path, train_jsonl: Path, eval_jsonl:
 def validate_nemo_bridge() -> None:
     bridge_module = NEMO_BRIDGE_DIR / "nemotron_nemo_bridge.py"
     sitecustomize_module = NEMO_BRIDGE_DIR / "sitecustomize.py"
-    if not bridge_module.exists() or not sitecustomize_module.exists():
+    if not all(
+        path.exists()
+        for path in (
+            bridge_module,
+            sitecustomize_module,
+            NEMO_RUNTIME_VALIDATOR,
+        )
+    ):
         raise FileNotFoundError(
             f"Expected NeMo bridge files under {NEMO_BRIDGE_DIR}"
         )
@@ -1378,53 +1386,8 @@ def nemo_subprocess_env() -> dict[str, str]:
 
 
 def validate_nemo_python() -> None:
-    check_code = """
-import sys
-import torch
-import ray
-import transformers
-from packaging.specifiers import SpecifierSet
-from packaging.version import Version
-if sys.version_info[:2] != (3, 12):
-    raise RuntimeError(f"Expected Python 3.12 for the Kaggle wheel set, got {sys.version}")
-if Version(transformers.__version__) not in SpecifierSet(">=5.5.0,<5.6.0"):
-    raise RuntimeError(
-        "This NeMo-RL/AutoModel checkout requires Transformers >=5.5,<5.6, "
-        f"got {transformers.__version__}"
-    )
-try:
-    import vllm
-except Exception as exc:
-    raise RuntimeError(
-        "The bundled vLLM wheel could not load with Kaggle's Torch 2.10/CUDA 12.8 "
-        "runtime. Upstream vLLM 0.20 release wheels default to CUDA 13, so the "
-        "offline wheelhouse must include the compatible wheel/runtime set."
-    ) from exc
-import nemo_automodel
-import nemo_rl
-import nemotron_nemo_bridge
-print(
-    "Validated NeMo runtime:",
-    f"torch={torch.__version__}",
-    f"cuda={torch.version.cuda}",
-    f"transformers={transformers.__version__}",
-    f"vllm={vllm.__version__}",
-)
-if torch.__version__.split("+", 1)[0] != "2.10.0":
-    raise RuntimeError(f"Expected torch 2.10.0 for the Kaggle wheel set, got {torch.__version__}")
-if torch.version.cuda != "12.8":
-    raise RuntimeError(f"Expected CUDA 12.8 PyTorch, got {torch.version.cuda}")
-if Version(vllm.__version__).release[:2] != (0, 20):
-    raise RuntimeError(
-        f"This NeMo-RL checkout requires the bundled vLLM 0.20.x API, got {vllm.__version__}"
-    )
-if not torch.cuda.is_available():
-    raise RuntimeError("CUDA is not available in the NeMo-RL subprocess")
-torch.empty(1, device="cuda")
-print("CUDA device:", torch.cuda.get_device_name(0))
-"""
     subprocess.run(
-        [str(NEMO_PYTHON), "-c", check_code],
+        [str(NEMO_PYTHON), str(NEMO_RUNTIME_VALIDATOR)],
         cwd=str(NEMO_RL_DIR),
         env=nemo_subprocess_env(),
         check=True,
