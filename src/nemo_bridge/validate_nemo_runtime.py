@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from importlib.metadata import version as installed_version
 
 import ray  # noqa: F401
 import torch
@@ -20,6 +21,13 @@ def validate_nemo_runtime() -> None:
         raise RuntimeError(
             "This NeMo-RL/AutoModel checkout requires Transformers >=5.5,<5.6, "
             f"got {transformers.__version__}"
+        )
+    antlr_version = Version(installed_version("antlr4-python3-runtime"))
+    if antlr_version != Version("4.9.3"):
+        raise RuntimeError(
+            "OmegaConf 2.3.0 requires antlr4-python3-runtime==4.9.3; "
+            f"got {antlr_version}. Rerun the Kaggle Dependencies cell to repair "
+            "the offline virtual environment."
         )
     try:
         import vllm
