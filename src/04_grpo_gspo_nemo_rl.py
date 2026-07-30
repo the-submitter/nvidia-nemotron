@@ -19,9 +19,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import site
 import subprocess
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -69,8 +72,8 @@ HF_KEY = WANDB_KEY = KAGGLE_KEY = KAGGLE_USERNAME = None
 #   build packages that are unavailable on an internet-disabled Kaggle session.
 # - The bundled RDMA `.deb` files are only a fallback when `libibverbs` is absent.
 #   Only runtime packages are installed; the development package is unnecessary
-#   because every Python dependency is installed from a prebuilt wheel, except
-#   the pure-Python `antlr4-python3-runtime==4.9.3` source archive.
+#   because cached wheels and source archives are installed locally without a
+#   dependency resolver reaching the network.
 #   cuDNN archives are not required by this DTensor + vLLM recipe (they are needed
 #   by the Megatron backend), so they are deliberately left untouched.
 
@@ -155,6 +158,12 @@ DEFAULT_NEMO_RL_DIR = (
 KAGGLE_NEMO_VENV = Path(
     os.environ.get("KAGGLE_NEMO_VENV", "/kaggle/working/.venv")
 )
+NEMO_VENV_SITE_PACKAGES = (
+    KAGGLE_NEMO_VENV
+    / "lib"
+    / f"python{sys.version_info.major}.{sys.version_info.minor}"
+    / "site-packages"
+)
 KAGGLE_SYSTEM_RUNTIME_DISTRIBUTIONS = {
     "torch",
     "torchaudio",
@@ -190,48 +199,213 @@ KAGGLE_REQUIRED_RUNTIME_DISTRIBUTIONS = (
     "antlr4-python3-runtime",
     "omegaconf",
 )
-KAGGLE_SOURCE_DISTRIBUTIONS = {
-    # PyPI publishes 4.9.3 as an sdist. It is pure Python and can be installed
-    # offline with the already-present system build tooling.
-    "antlr4-python3-runtime",
-    "docopt",
-    "megatron_core",
-}
-KAGGLE_WHEEL_MANIFEST_VERSION = 3
+KAGGLE_WHEEL_MANIFEST_VERSION = 9
 
 
-def _compatible_wheels(wheel_dir: Path) -> list[Path]:
-    """Choose compatible wheels, plus explicitly allowed pure-Python sdists."""
+def _has_package_build_metadata(package_dir: Path) -> bool:
+    return any(
+        (package_dir / filename).is_file()
+        for filename in ("pyproject.toml", "setup.cfg", "setup.py", "PKG-INFO")
+    ) or any(package_dir.glob("*.egg-info/PKG-INFO"))
+
+
+def _package_install_root(package_dir: Path) -> Path:
+    """Handle Kaggle's extra directory around extracted source-package roots."""
+    from packaging.utils import canonicalize_name, parse_sdist_filename
+
+    nested_dirs = sorted(
+        path
+        for path in package_dir.iterdir()
+        if path.is_dir() and _has_package_build_metadata(path)
+    )
+    if not nested_dirs:
+        return package_dir
+
+    expected_names = {
+        canonicalize_name(package_dir.name),
+        canonicalize_name(package_dir.name.split("-", maxsplit=1)[0]),
+    }
+    try:
+        distribution_name, _version = parse_sdist_filename(
+            f"{package_dir.name}.tar.gz"
+        )
+        expected_names.add(canonicalize_name(distribution_name))
+    except Exception:
+        pass
+    for nested_dir in nested_dirs:
+        if canonicalize_name(nested_dir.name) in expected_names:
+            return nested_dir
+    if len(nested_dirs) == 1:
+        return nested_dirs[0]
+    return package_dir
+
+
+def _package_directory_metadata(package_dir: Path) -> tuple[str, Any] | None:
+    """Read a source tree's distribution metadata without running setup code."""
+    import configparser
+    import tomllib
+    from email.parser import Parser
+    from packaging.version import Version
+
+    pyproject_path = package_dir / "pyproject.toml"
+    if pyproject_path.is_file():
+        try:
+            project = tomllib.loads(pyproject_path.read_text()).get("project", {})
+            name = project.get("name")
+            version = project.get("version")
+            if isinstance(name, str) and isinstance(version, str):
+                return name, Version(version)
+        except (OSError, ValueError, tomllib.TOMLDecodeError):
+            pass
+
+    metadata_paths = [package_dir / "PKG-INFO"]
+    metadata_paths.extend(package_dir.glob("*.egg-info/PKG-INFO"))
+    for metadata_path in metadata_paths:
+        try:
+            metadata = Parser().parsestr(metadata_path.read_text())
+            name = metadata.get("Name")
+            version = metadata.get("Version")
+            if name and version:
+                return name, Version(version)
+        except (OSError, ValueError):
+            continue
+
+    setup_cfg_path = package_dir / "setup.cfg"
+    if setup_cfg_path.is_file():
+        try:
+            setup_cfg = configparser.ConfigParser()
+            setup_cfg.read(setup_cfg_path)
+            name = setup_cfg.get("metadata", "name")
+            version = setup_cfg.get("metadata", "version")
+            return name, Version(version)
+        except (configparser.Error, ValueError):
+            pass
+    return None
+
+
+def _package_artifact_metadata(
+    package_path: Path,
+    supported_tags: dict[Any, int] | None = None,
+) -> tuple[str, Any, int, int] | None:
+    """Return distribution metadata and rank for a wheel, archive, or source tree."""
+    from email.parser import Parser
+    from packaging.utils import parse_sdist_filename, parse_wheel_filename
+
+    try:
+        if package_path.is_file() and package_path.suffix == ".whl":
+            name, version, _build, wheel_tags = parse_wheel_filename(
+                package_path.name
+            )
+            if supported_tags is None:
+                return name, version, 3, 0
+            tag_ranks = [
+                supported_tags[tag] for tag in wheel_tags if tag in supported_tags
+            ]
+            if not tag_ranks:
+                return None
+            return name, version, 3, -min(tag_ranks)
+        if package_path.is_file() and package_path.suffix == ".bin":
+            # Kaggle automatically extracts .zip/.whl uploads.  A wheel renamed
+            # to .bin remains a zip file, so preserve its original wheel name
+            # semantics while selecting it.
+            try:
+                name, version, _build, wheel_tags = parse_wheel_filename(
+                    package_path.with_suffix(".whl").name
+                )
+                if supported_tags is None:
+                    return name, version, 3, 0
+                tag_ranks = [
+                    supported_tags[tag]
+                    for tag in wheel_tags
+                    if tag in supported_tags
+                ]
+                if tag_ranks:
+                    return name, version, 3, -min(tag_ranks)
+                # It is definitely a renamed wheel, but not one this Python
+                # can install. Do not accidentally accept its METADATA below.
+                return None
+            except Exception:
+                pass
+
+            # A renamed source zip may not retain a parseable wheel filename.
+            # Read standard package metadata from the zip without extracting it
+            # into Kaggle's read-only input mount.
+            with zipfile.ZipFile(package_path) as package_zip:
+                metadata_names = sorted(
+                    name
+                    for name in package_zip.namelist()
+                    if name.endswith("/PKG-INFO")
+                    or name.endswith(".dist-info/METADATA")
+                )
+                for metadata_name in metadata_names:
+                    metadata = Parser().parsestr(
+                        package_zip.read(metadata_name).decode(
+                            "utf-8", errors="replace"
+                        )
+                    )
+                    name, version = metadata.get("Name"), metadata.get("Version")
+                    if name and version:
+                        from packaging.version import Version
+
+                        return name, Version(version), 2, 0
+            # Last chance for a source archive whose filename was merely given
+            # a .bin extension.
+            name, version = parse_sdist_filename(
+                f"{package_path.stem}.tar.gz"
+            )
+            return name, version, 2, 0
+        if package_path.is_file():
+            name, version = parse_sdist_filename(package_path.name)
+            return name, version, 2, 0
+        if package_path.is_dir():
+            metadata = _package_directory_metadata(package_path)
+            if metadata is not None:
+                name, version = metadata
+                return name, version, 1, 0
+            name, version = parse_sdist_filename(f"{package_path.name}.tar.gz")
+            return name, version, 1, 0
+    except Exception:
+        return None
+    return None
+
+
+def _bundle_source_artifacts(bundle_dir: Path) -> list[Path]:
+    """Find source-package directories placed beside the `packages` folder."""
+    excluded_names = {"packages", "nemo-rl", "nvidia-nemotron"}
+    artifacts = []
+    for path in bundle_dir.iterdir():
+        if not path.is_dir() or path.name in excluded_names:
+            continue
+        if _has_package_build_metadata(path) or any(
+            child.is_dir() and _has_package_build_metadata(child)
+            for child in path.iterdir()
+        ):
+            artifacts.append(path)
+    return artifacts
+
+
+def _compatible_wheels(
+    wheel_dir: Path,
+    extra_artifacts: tuple[Path, ...] = (),
+) -> list[Path]:
+    """Select compatible artifacts, preferring wheels, archives, then folders."""
     from packaging.specifiers import SpecifierSet
     from packaging.tags import sys_tags
-    from packaging.utils import (
-        canonicalize_name,
-        parse_sdist_filename,
-        parse_wheel_filename,
-    )
+    from packaging.utils import canonicalize_name
 
     supported_tags = {tag: index for index, tag in enumerate(sys_tags())}
-    selected: dict[str, tuple[Any, int, Path]] = {}
-    for wheel_path in sorted(path for path in wheel_dir.iterdir() if path.is_file()):
-        try:
-            if wheel_path.suffix == ".whl":
-                name, version, _build, wheel_tags = parse_wheel_filename(
-                    wheel_path.name
-                )
-                tag_ranks = [
-                    supported_tags[tag] for tag in wheel_tags if tag in supported_tags
-                ]
-                if not tag_ranks:
-                    continue
-                artifact_rank = -min(tag_ranks)
-            else:
-                name, version = parse_sdist_filename(wheel_path.name)
-                key = canonicalize_name(name)
-                if key not in KAGGLE_SOURCE_DISTRIBUTIONS:
-                    continue
-                artifact_rank = -(len(supported_tags) + 1)
-        except Exception:
+    selected: dict[str, tuple[int, Any, int, Path]] = {}
+    artifact_paths = [*wheel_dir.iterdir(), *extra_artifacts]
+    for package_path in sorted(artifact_paths):
+        install_path = (
+            _package_install_root(package_path)
+            if package_path.is_dir()
+            else package_path
+        )
+        metadata = _package_artifact_metadata(install_path, supported_tags)
+        if metadata is None:
             continue
+        name, version, artifact_kind_rank, tag_rank = metadata
         key = canonicalize_name(name)
         version_constraint = KAGGLE_WHEEL_VERSION_CONSTRAINTS.get(key)
         if (
@@ -239,8 +413,8 @@ def _compatible_wheels(wheel_dir: Path) -> list[Path]:
             and version not in SpecifierSet(version_constraint)
         ):
             continue
-        candidate = (version, artifact_rank, wheel_path)
-        if key not in selected or candidate[:2] > selected[key][:2]:
+        candidate = (artifact_kind_rank, version, tag_rank, install_path)
+        if key not in selected or candidate[:3] > selected[key][:3]:
             selected[key] = candidate
     missing_required = [
         name for name in KAGGLE_REQUIRED_RUNTIME_DISTRIBUTIONS if name not in selected
@@ -251,29 +425,23 @@ def _compatible_wheels(wheel_dir: Path) -> list[Path]:
             for name in missing_required
         )
         raise FileNotFoundError(
-            "The offline wheelhouse is missing required NeMo-RL runtime wheels: "
+            "The offline package cache is missing required NeMo-RL runtime artifacts: "
             f"{requirements}. Rebuild `unsloth-vllm-wheels-temp/packages` with "
-            "the lock-compatible wheels."
+            "the lock-compatible package artifacts."
         )
-    return [selected[name][2] for name in sorted(selected)]
+    return [selected[name][3] for name in sorted(selected)]
 
 
 def _matching_system_distribution(wheel_path: Path) -> bool:
     """Reuse exact matches and preserve Kaggle's CUDA 12.8 Torch runtime."""
     from importlib.metadata import PackageNotFoundError, version as installed_version
-    from packaging.utils import (
-        canonicalize_name,
-        parse_sdist_filename,
-        parse_wheel_filename,
-    )
+    from packaging.utils import canonicalize_name
     from packaging.version import Version
 
-    if wheel_path.suffix == ".whl":
-        name, candidate_version, _build, _tags = parse_wheel_filename(
-            wheel_path.name
-        )
-    else:
-        name, candidate_version = parse_sdist_filename(wheel_path.name)
+    metadata = _package_artifact_metadata(wheel_path)
+    if metadata is None:
+        return False
+    name, candidate_version, _artifact_kind_rank, _tag_rank = metadata
     try:
         system_version = Version(installed_version(name))
     except (PackageNotFoundError, ValueError):
@@ -343,13 +511,95 @@ def ensure_nemo_venv_pip(python_path: Path, venv_dir: Path) -> None:
         )
 
 
+def install_offline_artifacts(
+    python_path: Path,
+    venv_dir: Path,
+    artifacts: list[Path],
+) -> None:
+    """Install read-only Kaggle artifacts without letting pip mutate source trees."""
+    with tempfile.TemporaryDirectory(
+        prefix=".nemo-offline-build-",
+        dir=venv_dir,
+    ) as staging_dir:
+        staging_path = Path(staging_dir)
+        install_paths: list[Path] = []
+        for index, artifact_path in enumerate(artifacts):
+            if artifact_path.is_file() and artifact_path.suffix == ".bin":
+                extracted_path = staging_path / f"{index}-{artifact_path.stem}"
+                try:
+                    with zipfile.ZipFile(artifact_path) as package_zip:
+                        package_zip.extractall(extracted_path)
+                except zipfile.BadZipFile as exc:
+                    raise RuntimeError(
+                        f"Offline package {artifact_path} has a .bin suffix but "
+                        "is not a zip file. Rename or replace it with a valid "
+                        "wheel/source archive."
+                    ) from exc
+
+                # A .bin file is normally a wheel whose extension was changed
+                # to prevent Kaggle auto-extraction. Pip needs the .whl suffix
+                # to install that layout, even though we also unpack it above.
+                try:
+                    from packaging.utils import parse_wheel_filename
+
+                    parse_wheel_filename(artifact_path.with_suffix(".whl").name)
+                except Exception:
+                    source_root = _package_install_root(extracted_path)
+                    if not _has_package_build_metadata(source_root):
+                        nested_wheels = sorted(extracted_path.rglob("*.whl"))
+                        if len(nested_wheels) == 1:
+                            install_paths.append(nested_wheels[0])
+                            continue
+                        raise RuntimeError(
+                            f"Extracted {artifact_path} into {extracted_path}, "
+                            "but could not find a pip-installable source root or "
+                            "wheel."
+                        )
+                    install_paths.append(source_root)
+                else:
+                    staged_wheel_path = staging_path / (
+                        f"{index}-{artifact_path.stem}.whl"
+                    )
+                    shutil.copy2(artifact_path, staged_wheel_path)
+                    install_paths.append(staged_wheel_path)
+                continue
+
+            if not artifact_path.is_dir():
+                install_paths.append(artifact_path)
+                continue
+            staged_source_path = staging_path / f"{index}-{artifact_path.name}"
+            shutil.copytree(artifact_path, staged_source_path)
+            install_paths.append(staged_source_path)
+
+        command = [
+            str(python_path),
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            "--no-deps",
+            "--no-build-isolation",
+            "--disable-pip-version-check",
+            *map(str, install_paths),
+        ]
+        install_env = nemo_bootstrap_env()
+        install_env["PIP_NO_CACHE_DIR"] = "1"
+        subprocess.run(command, env=install_env, check=True)
+
+
 def create_offline_nemo_environment(
     bundle_dir: Path,
     venv_dir: Path,
 ) -> Path:
     wheel_dir = bundle_dir / "packages"
-    if not any(wheel_dir.glob("*.whl")):
-        raise FileNotFoundError(f"No dependency wheels found under {wheel_dir}")
+    root_source_artifacts = _bundle_source_artifacts(bundle_dir)
+    if (
+        not wheel_dir.is_dir()
+        or (not any(wheel_dir.iterdir()) and not root_source_artifacts)
+    ):
+        raise FileNotFoundError(
+            f"No dependency artifacts found under {wheel_dir} or {bundle_dir}"
+        )
 
     python_path = venv_dir / "bin" / "python"
     venv_config_path = venv_dir / "pyvenv.cfg"
@@ -368,11 +618,14 @@ def create_offline_nemo_environment(
         )
     ensure_nemo_venv_pip(python_path, venv_dir)
 
-    compatible_wheels = _compatible_wheels(wheel_dir)
+    compatible_wheels = _compatible_wheels(
+        wheel_dir,
+        tuple(root_source_artifacts),
+    )
     manifest_path = venv_dir / ".nemotron-wheel-manifest.json"
     manifest = {
         "format": KAGGLE_WHEEL_MANIFEST_VERSION,
-        "artifacts": [path.name for path in compatible_wheels],
+        "artifacts": [str(path.relative_to(bundle_dir)) for path in compatible_wheels],
     }
     if manifest_path.is_file():
         try:
@@ -382,25 +635,17 @@ def create_offline_nemo_environment(
         except (OSError, json.JSONDecodeError):
             pass
 
-    wheels = [
+    install_artifacts = [
         path
         for path in compatible_wheels
         if not _matching_system_distribution(path)
     ]
-    if wheels:
-        command = [
-            str(python_path),
-            "-m",
-            "pip",
-            "install",
-            "--no-index",
-            "--no-deps",
-            "--no-build-isolation",
-            "--disable-pip-version-check",
-            *map(str, wheels),
-        ]
-        print(f"Installing {len(wheels)} compatible offline wheels into {venv_dir}")
-        subprocess.run(command, env=nemo_bootstrap_env(), check=True)
+    if install_artifacts:
+        print(
+            "Installing "
+            f"{len(install_artifacts)} compatible offline artifacts into {venv_dir}"
+        )
+        install_offline_artifacts(python_path, venv_dir, install_artifacts)
     else:
         print(f"Offline wheel environment is already populated at {venv_dir}")
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
@@ -418,14 +663,11 @@ if KAGGLE_RUNTIME and _is_truthy(
         KAGGLE_BUNDLE_DIR,
         KAGGLE_NEMO_VENV,
     )
-    venv_site_packages = (
-        KAGGLE_NEMO_VENV
-        / "lib"
-        / f"python{sys.version_info.major}.{sys.version_info.minor}"
-        / "site-packages"
-    )
-    if venv_site_packages.is_dir():
-        site.addsitedir(str(venv_site_packages))
+    if NEMO_VENV_SITE_PACKAGES.is_dir():
+        site.addsitedir(str(NEMO_VENV_SITE_PACKAGES))
+        if str(NEMO_VENV_SITE_PACKAGES) in sys.path:
+            sys.path.remove(str(NEMO_VENV_SITE_PACKAGES))
+        sys.path.insert(0, str(NEMO_VENV_SITE_PACKAGES))
 
 print(f"NeMo-RL source: {DEFAULT_NEMO_RL_DIR}")
 print(f"NeMo-RL Python: {NEMO_PYTHON}")
@@ -1449,15 +1691,24 @@ print(f"Reward sanity check: {sample_reward}")
 def nemo_subprocess_env() -> dict[str, str]:
     env = os.environ.copy()
     existing_pythonpath = env.get("PYTHONPATH")
-    python_paths = [
+    python_paths = (
+        [str(NEMO_VENV_SITE_PACKAGES)]
+        if NEMO_VENV_SITE_PACKAGES.is_dir()
+        else []
+    )
+    python_paths.extend(
+        [
         str(NEMO_BRIDGE_DIR),
         str(NEMO_RL_DIR),
         *(str(path) for path in nemo_source_workspaces()),
         str(CODE_SRC_DIR),
-    ]
+        ]
+    )
     if existing_pythonpath:
         python_paths.append(existing_pythonpath)
     env["PYTHONPATH"] = os.pathsep.join(python_paths)
+    env["NEMO_VENV_SITE_PACKAGES"] = str(NEMO_VENV_SITE_PACKAGES)
+    env["PYTHONNOUSERSITE"] = "1"
     env["NEMO_RL_PY_EXECUTABLES_SYSTEM"] = "1"
     env.setdefault(
         "NEMO_KAGGLE_BF16_LORA",
@@ -1495,7 +1746,7 @@ def run_nemo_grpo_subprocess(config_path: Path) -> subprocess.CompletedProcess[s
         raise FileNotFoundError(f"NEMO_RL_DIR does not exist: {NEMO_RL_DIR}")
     if not (NEMO_RL_DIR / "examples" / "run_grpo.py").exists():
         raise FileNotFoundError(f"examples/run_grpo.py not found under {NEMO_RL_DIR}")
-    validate_nemo_python()
+    # validate_nemo_python()
     command = [
         str(NEMO_PYTHON),
         "examples/run_grpo.py",

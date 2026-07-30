@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from importlib.metadata import version as installed_version
+from pathlib import Path
 
 import ray  # noqa: F401
 import torch
@@ -29,6 +31,23 @@ def validate_nemo_runtime() -> None:
             f"got {antlr_version}. Rerun the Kaggle Dependencies cell to repair "
             "the offline virtual environment."
         )
+    from google import protobuf
+
+    protobuf_path = Path(protobuf.__file__).resolve()
+    venv_site_packages = os.environ.get("NEMO_VENV_SITE_PACKAGES")
+    if venv_site_packages and not protobuf_path.is_relative_to(
+        Path(venv_site_packages).resolve()
+    ):
+        raise RuntimeError(
+            "Protobuf resolved outside the NeMo virtual environment: "
+            f"{protobuf_path}. The subprocess must import the venv's protobuf "
+            "before Kaggle system site-packages."
+        )
+    if Version(protobuf.__version__) < Version("6.31.1"):
+        raise RuntimeError(
+            "SwanLab requires Protobuf >=6.31.1, "
+            f"got {protobuf.__version__} from {protobuf_path}"
+        )
     try:
         import vllm
     except Exception as exc:
@@ -39,8 +58,8 @@ def validate_nemo_runtime() -> None:
             "wheel/runtime set."
         ) from exc
 
-    import nemo_automodel  # noqa: F401
-    import nemo_rl  # noqa: F401
+    import nemo_automodel  # noqa: F401 # type: ignore
+    import nemo_rl  # noqa: F401 # type: ignore
     import nemotron_nemo_bridge  # noqa: F401
 
     print(
@@ -49,6 +68,7 @@ def validate_nemo_runtime() -> None:
         f"cuda={torch.version.cuda}",
         f"transformers={transformers.__version__}",
         f"vllm={vllm.__version__}",
+        f"protobuf={protobuf.__version__}",
     )
     if torch.__version__.split("+", 1)[0] != "2.10.0":
         raise RuntimeError(
