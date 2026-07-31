@@ -1,0 +1,35 @@
+flowchart LR
+
+    A["🏆 SFT / DPO LoRA Adapter"]
+    B["🏆 Unified Reasoning Dataset"]
+
+    subgraph PIPELINE["🚀 Group Sequence Policy Optimization (GSPO)"]
+
+        C["Prompt<br/>Preparation"]
+
+        D["Policy Rollouts<br/>(vLLM)"]
+
+        E["Reward<br/>Evaluation"]
+
+        F["GSPO Update<br/>(Unsloth + TRL)"]
+
+        G["Save Adapter<br/>& Checkpoints"]
+
+        C --> D --> E --> F --> G
+        F -. Updated Policy .-> D
+    end
+
+    H["🏆 GSPO LoRA Adapter"]
+
+    B --> C
+    A --> D
+    A --> F
+    G --> H
+
+    classDef data fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px;
+    classDef process fill:#E8F5E9,stroke:#43A047,stroke-width:2px;
+    classDef output fill:#E8EAF6,stroke:#3949AB,stroke-width:3px;
+
+    class A,B data;
+    class C,D,E,F,G process;
+    class H output;

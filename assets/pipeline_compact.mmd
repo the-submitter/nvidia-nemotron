@@ -1,0 +1,23 @@
+flowchart LR
+
+    A["📚 15 Reasoning<br/>Datasets"]
+    B["Dataset<br/>Engineering"]
+    C["SFT<br/>(LoRA)"]
+    D["Preference<br/>Generation"]
+    E["DPO"]
+    F["Experimental<br/>GSPO / GRPO"]
+
+    G["🏆 Final<br/>DPO Model"]
+
+    A --> B --> C --> D --> E --> F
+    E --> G
+
+    classDef data fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px;
+    classDef train fill:#E8F5E9,stroke:#43A047,stroke-width:2px;
+    classDef exp fill:#FCE4EC,stroke:#D81B60,stroke-width:2px;
+    classDef final fill:#E8EAF6,stroke:#3949AB,stroke-width:3px;
+
+    class A data;
+    class B,C,D,E train;
+    class F exp;
+    class G final;

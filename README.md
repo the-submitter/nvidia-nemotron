@@ -5,42 +5,93 @@ Training and dataset-building pipeline for NVIDIA Nemotron reasoning experiments
 ## Published Artifacts
 
 **Dataset**
-- Hugging Face: [`the-submitter/nemotron-reasoning`](https://huggingface.co/datasets/the-submitter/nemotron-reasoning)
 - Kaggle: [`rohitraje0493/nemotron-reasoning`](https://www.kaggle.com/datasets/rohitraje0493/nemotron-reasoning)
+- Hugging Face: [`the-submitter/nemotron-reasoning`](https://huggingface.co/datasets/the-submitter/nemotron-reasoning)
 
 **SFT**
 - Best noted run: `v7`, public `0.836`, private `0.852`
-- Hugging Face: [`the-submitter/nemotron-lora-sft-v2`](https://huggingface.co/the-submitter/nemotron-lora-sft-v2)
 - Kaggle: [`nemotron-3-nano/transformers/lora-sft/7`](https://www.kaggle.com/models/rohitraje0493/nemotron-3-nano/Transformers/lora-sft/7)
+- Hugging Face: [`the-submitter/nemotron-lora-sft-v2`](https://huggingface.co/the-submitter/nemotron-lora-sft-v2)
 
 **DPO**
 - Best noted run: `v9`, public `0.844`, private `0.856`
-- Hugging Face: [`the-submitter/nemotron-lora-dpo-v7`](https://huggingface.co/the-submitter/nemotron-lora-dpo-v7)
 - Kaggle: [`nemotron-3-nano/transformers/lora-dpo/9`](https://www.kaggle.com/models/rohitraje0493/nemotron-3-nano/transformers/lora-dpo)
+- Hugging Face: [`the-submitter/nemotron-lora-dpo-v7`](https://huggingface.co/the-submitter/nemotron-lora-dpo-v7)
+
+[**Kaggle notebooks**](#kaggle-notebook-run-notes-notebooksipynb)
+
+[**Kaggle writeup**](https://kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/writeups/nvidia-nemotron-model-reasoning-challenge)
 
 ## Repository Layout
 
-- `src/00_create_dataset.py` / `notebooks/00_create_dataset.ipynb`: build the unified reasoning dataset.
-- `src/01_sft.py` / `notebooks/01_sft.ipynb`: supervised fine-tuning with Unsloth + TRL `SFTTrainer`.
-- `src/02_update_dataset.py` / `notebooks/02_update_dataset.ipynb`: generate DPO chosen/rejected samples with vLLM.
-- `src/03_dpo.py` / `notebooks/03_dpo.ipynb`: continue the SFT LoRA adapter with DPO.
-- `src/04_grpo_gspo_unsloth.py` / `notebooks/04_grpo_gspo_unsloth.ipynb`: GSPO/GRPO experiment using Unsloth + colocated vLLM.
-- `src/04_grpo_gspo_trl.py` / `notebooks/04_grpo_gspo_trl.ipynb`: native Transformers/PEFT + TRL GRPO variant.
-- `references/`: reference notebooks/scripts used while adapting SFT, DPO, metric, and GRPO logic.
+| py script | corresponding notebook | description |
+| --- | --- | --- |
+| [`src/00_create_dataset.py`](src/00_create_dataset.py) | [`notebooks/00_create_dataset.ipynb`](notebooks/00_create_dataset.ipynb) | build the unified reasoning dataset |
+| [`src/01_sft.py`](src/01_sft.py) | [`notebooks/01_sft.ipynb`](notebooks/01_sft.ipynb) | supervised fine-tuning with Unsloth + TRL `SFTTrainer` |
+| [`src/02_update_dataset.py`](src/02_update_dataset.py) | [`notebooks/02_update_dataset.ipynb`](notebooks/02_update_dataset.ipynb) | generate DPO chosen/rejected samples with vLLM |
+| [`src/03_dpo.py`](src/03_dpo.py) | [`notebooks/03_dpo.ipynb`](notebooks/03_dpo.ipynb) | continue the SFT LoRA adapter with DPO |
+| [`src/04_grpo_gspo_unsloth.py`](src/04_grpo_gspo_unsloth.py) | [`notebooks/04_grpo_gspo_unsloth.ipynb`](notebooks/04_grpo_gspo_unsloth.ipynb) | GSPO/GRPO experiment using Unsloth + colocated vLLM |
+| [`src/04_grpo_gspo_trl.py`](src/04_grpo_gspo_trl.py) | [`notebooks/04_grpo_gspo_trl.ipynb`](notebooks/04_grpo_gspo_trl.ipynb) | native Transformers/PEFT + TRL GRPO variant |
+| [`src/04_grpo_gspo_nemo_rl.py`](src/04_grpo_gspo_nemo_rl.py) ([`nemo-rl`](https://github.com/the-submitter/nvidia-nemotron/tree/nemo-rl) branch) | [`notebooks/04_grpo_gspo_nemo_rl.ipynb`](notebooks/04_grpo_gspo_nemo_rl.ipynb) ([`nemo-rl`](https://github.com/the-submitter/nvidia-nemotron/tree/nemo-rl) branch) | NeMo RL GRPO variant with custom reward environment + colocated vLLM |
+| [`src/99_submission.py`](src/99_submission.py) | [`notebooks/99_submission.ipynb`](notebooks/99_submission.ipynb) | Kaggle submission script |
+| `references/` | `references/notebooks/` | reference notebooks/scripts used while adapting SFT, DPO, metric, and GRPO logic |
 
 ## Execution Model
 
 The scripts are written in py:percent format so they can be edited as Python files and run as notebooks on Kaggle. Most paths default to Kaggle locations such as `/kaggle/input` and `/kaggle/working`, while key settings can be overridden with environment variables.
 
+## Hardware and Runtime
+
+Experiments were run on the Kaggle G4 VM server.
+
+| Item | Value |
+| --- | --- |
+| OS | Ubuntu 22.04 LTS |
+| CPU | AMD EPYC 9B45, 24 cores / 48 threads |
+| RAM | 176 GB |
+| GPU | 1 x NVIDIA RTX PRO 6000 Blackwell, 96 GB |
+| Internet | Disabled |
+
+| No. | Step | Notebook(s) | Runtime |
+| --- | --- | --- | ---: |
+| 00 | Create Dataset | [`notebooks/00_create_dataset.ipynb`](notebooks/00_create_dataset.ipynb) | About 33 minutes |
+| 01 | SFT | [`notebooks/01_sft.ipynb`](notebooks/01_sft.ipynb) | About 7 hours |
+| 02 | Update Dataset | [`notebooks/02_update_dataset.ipynb`](notebooks/02_update_dataset.ipynb) | About 4 hours, 30 minutes |
+| 03 | DPO | [`notebooks/03_dpo.ipynb`](notebooks/03_dpo.ipynb) | About 45 minutes |
+| 04 | GSPO/GRPO | `notebooks/04_grpo_gspo*.ipynb` | state-dict sync issues, CUDA OOM |
+
+## Installation
+
+- `torch==2.10.0+cu128` is assumed to be already installed on the system. This is the default on Kaggle G4 VM servers. If not installed, do so using: 
+  ```bash
+  pip install "torch==2.10.0" torchvision --index-url https://download.pytorch.org/whl/cu128
+  ```
+- The notebook scripts in `notebooks/*.ipynb` install their own requirements besides `torch`, so skip the manual installation given below.
+- To use the corresponding python (py:percent) scripts in `src/*.py`, install dependencies using:
+  ```bash
+  # pip
+  pip install -r requirements.txt
+
+  # OR uv
+  uv pip install -r requirements.txt
+  ```
+  Notes: 
+  - create a python (or uv) venv `python -m venv .venv` (or `uv venv`) if needed. 
+  - The `src/04_grpo_gspo_nemo_rl.py` script in `nemo-rl` branch installs its own dependencies besides `torch`, so this manual install step can be skipped for it.
+
 ## Pipeline Overview
 
-1. `00_create_dataset.py` creates and uploads the base reasoning dataset.
-2. `01_sft.py` filters response-ready samples and trains an SFT LoRA adapter.
-3. `02_update_dataset.py` uses the base model + LoRA in vLLM to generate multiple trajectories for response-missing prompts, then writes `chosen` / `rejected` preference fields.
-4. `03_dpo.py` filters preference-ready rows and continues the LoRA adapter with DPO.
-5. `04_grpo_gspo*.py` run experimental GSPO/GRPO training from the SFT/DPO adapter or a new adapter.
+<img src="assets/pipeline.png" alt="Pipeline" style="display: block; margin: 0 auto;">
 
-## `src/00_create_dataset.py` — Dataset Creation
+1. `00_create_dataset.py` (or `00_create_dataset.ipynb`) creates and uploads the base reasoning dataset.
+2. `01_sft.py`( or `01_sft.ipynb`) filters response-ready samples and trains an SFT LoRA adapter.
+3. `02_update_dataset.py` (or `02_update_dataset.ipynb`) uses the base model + LoRA in vLLM to generate multiple trajectories for response-missing prompts, then writes `chosen` / `rejected` preference fields.
+4. `03_dpo.py` (or `03_dpo.ipynb`) filters preference-ready rows and continues the LoRA adapter with DPO.
+5. `04_grpo_gspo*.py` (or `04_grpo_gspo*.ipynb`) run experimental GSPO/GRPO training from the SFT/DPO adapter or a new adapter.
+
+## [`src/00_create_dataset.py`](src/00_create_dataset.py) — Dataset Creation
+
+**Corresponding Notebook**: [`notebooks/00_create_dataset.ipynb`](notebooks/00_create_dataset.ipynb)
 
 Builds the unified dataset schema:
 
@@ -55,8 +106,8 @@ Builds the unified dataset schema:
 - `difficulty`
 
 **Sources**
-- Hugging Face datasets: NuminaMath, competition_math, OpenR1-Math, GSM8K, SVAMP, ASDiv, DROP, ProofWriter, FOLIO, ProntoQA, ZebraLogic, Enigmata, OpenMathReasoning.
-- Local/Kaggle inputs: Nemotron COT Tong and NVIDIA Nemotron model reasoning challenge data.
+- Local/Kaggle inputs: NVIDIA Nemotron model reasoning challenge data and Nemotron COT Tong.
+- Hugging Face datasets: OpenMathReasoning, Enigmata, NuminaMath, competition_math, OpenR1-Math, GSM8K, DROP, ProofWriter, ZebraLogic, FOLIO, ProntoQA, SVAMP, ASDiv.
 
 **Processing**
 - Normalizes each source into the shared schema via `DatasetConfig`.
@@ -82,7 +133,16 @@ Important knobs:
 - `TRAIN_SHUFFLE`, `VALIDATION_SHUFFLE`, `TEST_SHUFFLE`
 - `KEEP_IN_MEMORY`, `DATASET_NUM_PROC`, `STREAM_LOG_INTERVAL`
 
-## `src/01_sft.py` — SFT Training
+| Split | Records |
+|---|---:|
+| Train | **80,611** |
+| Validation | **514** |
+| Test | **473** |
+| **Total** | **81,598** |
+
+## [`src/01_sft.py`](src/01_sft.py) — SFT Training
+
+**Corresponding Notebook**: [`notebooks/01_sft.ipynb`](notebooks/01_sft.ipynb)
 
 Trains Nemotron with response-ready rows from the reasoning dataset.
 
@@ -112,7 +172,9 @@ Important knobs:
 - `LEARNING_RATE`, `NUM_TRAIN_EPOCHS`, `MAX_STEPS`
 - `PUSH_TO_HUB`, `PUSH_TO_KAGGLE`
 
-## `src/02_update_dataset.py` — Preference Dataset Update
+## [`src/02_update_dataset.py`](src/02_update_dataset.py) — Preference Dataset Update
+
+**Corresponding Notebook**: [`notebooks/02_update_dataset.ipynb`](notebooks/02_update_dataset.ipynb)
 
 Adds DPO preference fields to the base dataset by generating new trajectories for candidate prompts.
 
@@ -154,7 +216,9 @@ Important knobs:
 - `DEBUG_CSV_BACKUP`, `BACKUP_TRAJECTORIES`
 - `UPLOAD_TO_HF`, `UPLOAD_TO_KAGGLE`
 
-## `src/03_dpo.py` — DPO Training
+## [`src/03_dpo.py`](src/03_dpo.py) — DPO Training
+
+**Corresponding Notebook**: [`notebooks/03_dpo.ipynb`](notebooks/03_dpo.ipynb)
 
 Continues the SFT LoRA adapter with direct preference optimization.
 
@@ -180,7 +244,9 @@ Important knobs:
 - `TRAIN_MIN_IDX`, `TRAIN_MAX_IDX`, `EVAL_MIN_IDX`, `EVAL_MAX_IDX`
 - `LORA_R`, `LORA_ALPHA`, `LEARNING_RATE`, `MAX_STEPS`
 
-## `src/04_grpo_gspo_unsloth.py` — GSPO/GRPO with Unsloth
+## [`src/04_grpo_gspo_unsloth.py`](src/04_grpo_gspo_unsloth.py) — GSPO/GRPO with Unsloth
+
+**Corresponding Notebook**: [`notebooks/04_grpo_gspo_unsloth.ipynb`](notebooks/04_grpo_gspo_unsloth.ipynb)
 
 Experimental GSPO/GRPO stage using TRL `GRPOTrainer` with colocated vLLM and Unsloth model loading.
 
@@ -193,7 +259,7 @@ Experimental GSPO/GRPO stage using TRL `GRPOTrainer` with colocated vLLM and Uns
 
 **Reward**
 - Unified reward combines:
-  - exact answer verification against `final_answer`
+  - exact answer verification against `final_answer` using a combination of binary full match, `math.isclose()` with relative tolerance of 1e-2, and `math_verify`.
   - fuzzy matching of extracted answers
   - fuzzy matching (token set ratio) of full completion against known `reasoning + response`
   - boxed-answer format reward
@@ -206,11 +272,13 @@ Experimental GSPO/GRPO stage using TRL `GRPOTrainer` with colocated vLLM and Uns
 - Kept as an experimental Unsloth path.
 - Notes from Kaggle: vLLM/Unsloth state-dict synchronization issues were encountered with the current Nemotron hybrid model.
 
-## `src/04_grpo_gspo_trl.py` — GSPO/GRPO with Native TRL
+## [`src/04_grpo_gspo_trl.py`](src/04_grpo_gspo_trl.py) — GSPO/GRPO with Native TRL
+
+**Corresponding Notebook**: [`notebooks/04_grpo_gspo_trl.ipynb`](notebooks/04_grpo_gspo_trl.ipynb)
 
 Native Transformers/PEFT + TRL GRPO variant created because Unsloth had issues syncing with vLLM for this hybrid model.
 
-**Differences from `04_grpo_gspo_unsloth.py`**
+**Differences from [`04_grpo_gspo_unsloth.py`](src/04_grpo_gspo_unsloth.py)**
 - Loads the base model with `AutoModelForCausalLM`.
 - Attaches or resumes LoRA with PEFT.
 - Uses TRL `GRPOTrainer` directly with `use_vllm=True` and `vllm_mode="colocate"`.
@@ -218,6 +286,32 @@ Native Transformers/PEFT + TRL GRPO variant created because Unsloth had issues s
 
 **Status**
 - Notes from Kaggle: native TRL colocated vLLM path hit CUDA OOM in the recorded run.
+
+## [`src/04_grpo_gspo_nemo_rl.py`](src/04_grpo_gspo_nemo_rl.py) — GSPO/GRPO with NeMo RL
+
+**Corresponding Notebook**: [`notebooks/04_grpo_gspo_nemo_rl.ipynb`](notebooks/04_grpo_gspo_nemo_rl.ipynb)
+
+**GitHub branch**: [`nemo-rl`](https://github.com/the-submitter/nvidia-nemotron/tree/nemo-rl)
+
+- Available on the [`nemo-rl`](https://github.com/the-submitter/nvidia-nemotron/tree/nemo-rl) branch. 
+- This experimental Kaggle path runs NeMo-RL's `examples/run_grpo.py` entry point with 
+a materialized GRPO/GSPO configuration, colocated vLLM generation, and a 
+registered custom reward environment. 
+- It keeps the same response-ready dataset preparation, source/HQ/DPO-aware ordering, 
+and unified answer/format/reasoning reward used by the other GRPO notebooks.
+
+- The notebook is designed for an internet-disabled Kaggle GPU session: it builds
+a writable offline virtual environment from the attached dependency dataset,
+reuses Kaggle's CUDA-matched PyTorch installation, and makes Ray workers use the
+same environment.
+- `configs/` contain the NeMo RL configs for GSPO/GRPO.
+- `src/nemo_bridge/` contains utility code for the custom NeMo RL environment and connecting to NeMo RL.
+
+**Status**
+- Installation and runtime compatibility on the Kaggle G4 VM server 
+remain the principal area of experimentation for this path.
+
+
 
 ## High-Quality Filtering
 
@@ -244,12 +338,16 @@ GRPO scripts also support:
 
 ## Kaggle Notebook Run Notes (`notebooks/*.ipynb`)
 
-- `00_create_dataset.ipynb`: Create Dataset, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-create-dataset`: Version 19.
-- `01_sft.ipynb`: SFT Train, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-sft`: Version 11.
-- `02_update_dataset.ipynb`: Update Dataset, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-update-dataset`: Version 12.
-- `03_dpo.ipynb`: DPO Train, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-dpo`: Version 11.
-- `04_grpo_gspo_unsloth.ipynb`: GSPO Train Unsloth, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-grpo-gspo-unsloth?scriptVersionId=329178155`: vLLM path hit Unsloth state-dict mapping/sync issues; Transformers fallback was too slow.
-- `04_grpo_gspo_trl.ipynb`: GSPO Train TRL, `https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-grpo-gspo-trl`: colocated vLLM path hit CUDA OOM.
+| Notebook | Step | Status | Kaggle Link |
+| --- | --- | --- | --- |
+| [`00_create_dataset.ipynb`](notebooks/00_create_dataset.ipynb) | Create Dataset | Version 19 | [nvidia-nemotron-create-dataset](https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-create-dataset) |
+| [`01_sft.ipynb`](notebooks/01_sft.ipynb) | SFT Train | Version 11 | [nvidia-nemotron-sft](https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-sft) |
+| [`02_update_dataset.ipynb`](notebooks/02_update_dataset.ipynb) | Update Dataset | Version 12 | [nvidia-nemotron-update-dataset](https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-update-dataset) |
+| [`03_dpo.ipynb`](notebooks/03_dpo.ipynb) | DPO Train | Version 11 | [nvidia-nemotron-dpo](https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-dpo) |
+| [`04_grpo_gspo_unsloth.ipynb`](notebooks/04_grpo_gspo_unsloth.ipynb) | GSPO Train Unsloth | vLLM path hit Unsloth state-dict mapping/sync issues; Transformers fallback was too slow | [nvidia-nemotron-grpo-gspo-unsloth](https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-grpo-gspo-unsloth?scriptVersionId=329178155) |
+| [`04_grpo_gspo_trl.ipynb`](notebooks/04_grpo_gspo_trl.ipynb) | GSPO Train TRL | colocated vLLM path hit CUDA OOM | [nvidia-nemotron-grpo-gspo-trl](https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-grpo-gspo-trl) |
+| [`04_grpo_gspo_nemo_rl.ipynb`](notebooks/04_grpo_gspo_nemo_rl.ipynb) | GSPO Train NeMo RL | installation and runtime compatibility issues/debugging on Kaggle G4 VM GPU server (internet disabled) | [nvidia-nemotron-grpo-gspo-nemo-rl](https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-grpo-gspo-nemo-rl) |
+| [`99_submission.ipynb`](notebooks/99_submission.ipynb) | Kaggle Submission | Version 20 | [nvidia-nemotron-submission](https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-submission) |
 
 ## Practical Notes
 
