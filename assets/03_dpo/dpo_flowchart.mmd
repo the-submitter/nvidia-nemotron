@@ -1,0 +1,31 @@
+flowchart LR
+
+    A["🏆 Preference-Augmented Dataset"]
+    B["🏆 SFT LoRA Adapter"]
+
+    subgraph PIPELINE["🎯 Direct Preference Optimization (DPO)"]
+
+        C["Preference Pair<br/>Filtering"]
+
+        D["Chat Template<br/>& Formatting"]
+
+        E["DPO LoRA Training<br/>(Unsloth + TRL)"]
+
+        F["Save Adapter<br/>& Checkpoints"]
+
+        C --> D --> E --> F
+    end
+
+    G["🏆 DPO LoRA Adapter"]
+
+    A --> C
+    B --> E
+    F --> G
+
+    classDef data fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px;
+    classDef process fill:#E8F5E9,stroke:#43A047,stroke-width:2px;
+    classDef output fill:#E8EAF6,stroke:#3949AB,stroke-width:3px;
+
+    class A,B data;
+    class C,D,E,F process;
+    class G output;

@@ -31,3 +31,6 @@ queries.md
 outputs_*/
 log_*
 *-lora/
+WINNING_SOLUTION*
+winning_solution*
+!WINNING_SOLUTION_WRITEUP.md

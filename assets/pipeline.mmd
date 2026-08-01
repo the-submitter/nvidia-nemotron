@@ -1,0 +1,54 @@
+flowchart TD
+
+    %% =========================
+    %% Data
+    %% =========================
+
+    DATA["📚 15 Reasoning Data Sources"]
+
+    %% =========================
+    %% Main Pipeline
+    %% =========================
+
+    subgraph PIPELINE["🏗️ Training Pipeline"]
+
+        CREATE["'00_create_dataset.py'<br/>(or .ipynb)<br/><br/>Normalize, extract,<br/>filter, deduplicate & split"]
+
+        SFT["'01_sft.py'<br/>(or .ipynb)<br/><br/>16-bit LoRA<br/>Supervised Fine-Tuning"]
+
+        UPDATE["'02_update_dataset.py'<br/>(or .ipynb)<br/><br/>Generate 4 trajectories per question<br/>using vLLM and construct<br/>chosen/rejected preference data"]
+
+        DPO["'03_dpo.py'<br/>(or .ipynb)<br/><br/>Continue the SFT adapter<br/>with DPO"]
+
+        RL["'04_grpo_gspo*.py'<br/>(or .ipynb)<br/><br/>Experimental online<br/>GSPO / GRPO implementations"]
+
+        CREATE --> SFT --> UPDATE --> DPO --> RL
+
+    end
+
+    %% =========================
+    %% Submission
+    %% =========================
+
+    SFT_SUB["📦 '99_submission.py'<br/>(or .ipynb)<br/><br/>Package<br/>SFT v7 Adapter"]
+
+    DPO_SUB["📦 '99_submission.py'<br/>(or .ipynb)<br/><br/>Package<br/>DPO v9 Adapter"]
+
+    DATA --> CREATE
+
+    SFT -.-> SFT_SUB
+    DPO -.-> DPO_SUB
+
+    %% =========================
+    %% Styling
+    %% =========================
+
+    classDef data fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px;
+    classDef train fill:#E8F5E9,stroke:#43A047,stroke-width:2px;
+    classDef exp fill:#FCE4EC,stroke:#D81B60,stroke-width:2px;
+    classDef submit fill:#FFF8E1,stroke:#FB8C00,stroke-width:2px;
+
+    class DATA data;
+    class CREATE,SFT,UPDATE,DPO train;
+    class RL exp;
+    class SFT_SUB,DPO_SUB submit;

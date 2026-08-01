@@ -69,3 +69,20 @@ Loads or resumes LoRA adapters with PEFT and trains via TRL GRPOTrainer.
 Kept as the cleaner native path, though recorded Kaggle attempts hit colocated-vLLM CUDA OOM.
 
 GitHub project link: https://github.com/the-submitter/nvidia-nemotron
+
+NeMo RL variant:
+link: https://www.kaggle.com/code/rohitraje0493/nvidia-nemotron-grpo-gspo-nemo-rl
+GitHub branch: nemo-rl
+description:
+NeMo RL GSPO/GRPO Overview
+Available on the `nemo-rl` branch. This experimental Kaggle path runs NeMo-RL's
+`examples/run_grpo.py` entry point with a materialized GRPO/GSPO configuration,
+colocated vLLM generation, and a registered custom reward environment. It keeps
+the same response-ready dataset preparation, source/HQ/DPO-aware ordering, and
+unified answer/format/reasoning reward used by the other GRPO notebooks.
+
+The notebook is designed for an internet-disabled Kaggle GPU session: it builds
+a writable offline virtual environment from the attached dependency dataset,
+reuses Kaggle's CUDA-matched PyTorch installation, and makes Ray workers use the
+same environment. Installation and runtime compatibility remain the principal
+area of experimentation for this path.

@@ -1,0 +1,34 @@
+[`main` git branch]
+.
+./assets
+./assets/01_sft
+./assets/01_sft/wandb
+./assets/02_update_dataset
+./assets/03_dpo
+./assets/03_dpo/wandb
+./logs
+./logs/deprecated
+./notebooks
+./references
+./references/notebooks
+./scripts
+./src
+
+
+[`nemo-rl` git branch]
+.
+./assets
+./assets/01_sft
+./assets/01_sft/wandb
+./assets/02_update_dataset
+./assets/03_dpo
+./assets/03_dpo/wandb
+./configs
+./logs
+./logs/deprecated
+./notebooks
+./references
+./references/notebooks
+./scripts
+./src
+./src/nemo_bridge

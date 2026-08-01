@@ -1,0 +1,33 @@
+flowchart LR
+
+    A["🏆 Unified Reasoning Dataset"]
+
+    subgraph PIPELINE["🧠 Supervised Fine-Tuning (SFT)"]
+
+        B["Response-Ready<br/>Filtering"]
+
+        C["Quality Filtering<br/>& Source Controls"]
+
+        D["Chat Template<br/>& Formatting"]
+
+        E["LoRA Setup<br/>(Unsloth)"]
+
+        F["SFT Training<br/>(TRL)"]
+
+        G["Save Adapter<br/>& Checkpoints"]
+
+        B --> C --> D --> E --> F --> G
+    end
+
+    H["🏆 SFT LoRA Adapter"]
+
+    A --> B
+    G --> H
+
+    classDef data fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px;
+    classDef process fill:#E8F5E9,stroke:#43A047,stroke-width:2px;
+    classDef output fill:#E8EAF6,stroke:#3949AB,stroke-width:3px;
+
+    class A data;
+    class B,C,D,E,F,G process;
+    class H output;

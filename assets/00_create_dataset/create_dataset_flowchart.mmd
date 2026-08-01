@@ -1,0 +1,31 @@
+flowchart LR
+
+    A["📚 15 Reasoning<br/>Datasets"]
+
+    subgraph PIPELINE["🏗️ Dataset Engineering"]
+
+        B["Canonical<br/>Schema"]
+
+        C["Extract<br/>Reasoning & Answers"]
+
+        D["Normalize<br/>Examples"]
+
+        E["Quality Filter"]
+
+        F["Deduplicate<br/>& Split"]
+
+        B --> C --> D --> E --> F
+    end
+
+    G["🏆 Unified Dataset<br/>81,598 Samples"]
+
+    A --> B
+    F --> G
+
+    classDef source fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px;
+    classDef process fill:#E8F5E9,stroke:#43A047,stroke-width:2px;
+    classDef output fill:#E8EAF6,stroke:#3949AB,stroke-width:3px;
+
+    class A source;
+    class B,C,D,E,F process;
+    class G output;

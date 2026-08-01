@@ -1,0 +1,31 @@
+flowchart LR
+
+    A["🏆 SFT LoRA Adapter"]
+
+    subgraph PIPELINE["⚖️ Preference Generation"]
+
+        B["Response-Missing<br/>Selection"]
+
+        C["Generate Multiple<br/>Trajectories<br/>(vLLM)"]
+
+        D["Answer<br/>Verification"]
+
+        E["Construct<br/>Chosen / Rejected<br/>Pairs"]
+
+        F["Update<br/>Dataset"]
+
+        B --> C --> D --> E --> F
+    end
+
+    G["🏆 Preference-Augmented Dataset"]
+
+    A --> C
+    F --> G
+
+    classDef data fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px;
+    classDef process fill:#E8F5E9,stroke:#43A047,stroke-width:2px;
+    classDef output fill:#E8EAF6,stroke:#3949AB,stroke-width:3px;
+
+    class A data;
+    class B,C,D,E,F process;
+    class G output;
